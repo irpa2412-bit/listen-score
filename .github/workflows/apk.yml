@@ -130,8 +130,8 @@ jobs:
             "splashScreenFadeOutDuration": 300
           }
           JSON
-          bubblewrap update --skipVersionUpgrade --manifest=.
-          bubblewrap build --manifest=.
+          bubblewrap update --skipVersionUpgrade --manifest=twa-manifest.json
+          bubblewrap build --manifest=twa-manifest.json
           test -s app-release-signed.apk
           test "$(stat -c%s app-release-signed.apk)" -gt 500000
           cp app-release-signed.apk listen-score.apk

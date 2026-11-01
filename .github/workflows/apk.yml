@@ -92,6 +92,11 @@ jobs:
           keytool -genkeypair -v -keystore android.keystore -storepass "$BUBBLEWRAP_KEYSTORE_PASSWORD" -keypass "$BUBBLEWRAP_KEY_PASSWORD" -alias listen-score -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Listen Score, OU=IRPA, O=IRPA, L=Longido, ST=Arusha, C=TZ"
           mkdir -p "$HOME/.bubblewrap"
           printf '{"jdkPath":"%s","androidSdkPath":"%s"}\n' "$JAVA_HOME" "$ANDROID_HOME" > "$HOME/.bubblewrap/config.json"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls -la "$ANDROID_HOME"
+          ls -la "$ANDROID_HOME/platform-tools" "$ANDROID_HOME/platforms/android-35" "$ANDROID_HOME/build-tools/35.0.0"
+          cat "$HOME/.bubblewrap/config.json"
+          bubblewrap doctor
 
       - name: Configure and build Trusted Web Activity
         shell: bash

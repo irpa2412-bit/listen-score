@@ -133,7 +133,7 @@ $('rec').onclick=async()=>{
   chunks=[];rec=new MediaRecorder(s);rec.ondataavailable=e=>chunks.push(e.data);
   rec.onstop=async()=>{s.getTracks().forEach(t=>t.stop());$('rec').classList.remove('on');$('rec').textContent='Record';clearInterval(tm);transcribe(await new Blob(chunks).arrayBuffer())};
   rec.start();$('rec').classList.add('on');const t0=Date.now();
-  var tm=setInterval(()=>$('rec').textContent='Stop '+Math.floor((Date.now()-t0)/1000)+'s',500);$('rec').textContent='Stop 0s';
+  var tm=setInterval(()=>{$('rec').textContent='Stop '+Math.floor((Date.now()-t0)/1000)+'s';msg('Recording…')},500);$('rec').textContent='Stop 0s';
  }catch(e){msg('Microphone blocked. Allow it in Chrome: Site settings > Microphone.')}};
 function stopPlay(){playing.forEach(o=>{try{o.stop()}catch(e){}});playing=[];$('play').textContent='Play'}
 $('play').onclick=async()=>{

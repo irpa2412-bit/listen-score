@@ -129,6 +129,7 @@ jobs:
             "webManifestUrl": "https://irpa2412-bit.github.io/listen-score/manifest.json",
             "display": "standalone",
             "fallbackType": "customtabs",
+            "enableNotifications": false,
             "themeColor": "#12203a",
             "themeColorDark": "#12203a",
             "backgroundColor": "#12203a",

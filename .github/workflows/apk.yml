@@ -102,17 +102,10 @@ jobs:
 
       - name: Configure and build Trusted Web Activity
         shell: bash
-        env:
-          BUBBLEWRAP_KEYSTORE_PASSWORD: ${{ secrets.BUBBLEWRAP_KEYSTORE_PASSWORD }}
-          BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.BUBBLEWRAP_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          if [ -z "$BUBBLEWRAP_KEYSTORE_PASSWORD" ]; then
-            BUBBLEWRAP_KEYSTORE_PASSWORD="$(grep '^BUBBLEWRAP_KEYSTORE_PASSWORD=' "$GITHUB_ENV" | tail -1 | cut -d= -f2-)"
-          fi
-          if [ -z "$BUBBLEWRAP_KEY_PASSWORD" ]; then
-            BUBBLEWRAP_KEY_PASSWORD="$BUBBLEWRAP_KEYSTORE_PASSWORD"
-          fi
+          : "${BUBBLEWRAP_KEYSTORE_PASSWORD:?Signing password was not passed from the key-generation step}"
+          : "${BUBBLEWRAP_KEY_PASSWORD:?Signing key password was not passed from the key-generation step}"
           export BUBBLEWRAP_KEYSTORE_PASSWORD BUBBLEWRAP_KEY_PASSWORD
           cat > twa-manifest.json <<'JSON'
           {

@@ -130,6 +130,7 @@ jobs:
             "display": "standalone",
             "fallbackType": "customtabs",
             "enableNotifications": false,
+            "minSdkVersion": 24,
             "themeColor": "#12203a",
             "themeColorDark": "#12203a",
             "backgroundColor": "#12203a",

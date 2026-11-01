@@ -1,0 +1,155 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/apk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify live PWA endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://irpa2412-bit.github.io/listen-score"
+          for path in "/" "/manifest.json" "/icon.svg"; do
+            status="$(curl --retry 3 --retry-all-errors --retry-delay 2 -sS -L -o /dev/null -w '%{http_code}' "$BASE$path")"
+            echo "$path HTTP $status"
+            test "$status" = "200"
+          done
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Accept Android SDK licences
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          yes | sdkmanager --licenses >/dev/null || true
+
+      - name: Install SVG converter and Bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librsvg2-bin
+          npm install --global @bubblewrap/cli
+
+      - name: Create app icon and signing key
+        shell: bash
+        env:
+          BUBBLEWRAP_KEYSTORE_PASSWORD: ${{ secrets.BUBBLEWRAP_KEYSTORE_PASSWORD }}
+          BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.BUBBLEWRAP_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          rsvg-convert -w 512 -h 512 icon.svg -o icon-512.png
+          if [ -z "$BUBBLEWRAP_KEYSTORE_PASSWORD" ]; then
+            BUBBLEWRAP_KEYSTORE_PASSWORD="$(openssl rand -hex 24)"
+            echo "::add-mask::$BUBBLEWRAP_KEYSTORE_PASSWORD"
+            echo "BUBBLEWRAP_KEYSTORE_PASSWORD=$BUBBLEWRAP_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          fi
+          if [ -z "$BUBBLEWRAP_KEY_PASSWORD" ]; then
+            BUBBLEWRAP_KEY_PASSWORD="$BUBBLEWRAP_KEYSTORE_PASSWORD"
+            echo "::add-mask::$BUBBLEWRAP_KEY_PASSWORD"
+            echo "BUBBLEWRAP_KEY_PASSWORD=$BUBBLEWRAP_KEY_PASSWORD" >> "$GITHUB_ENV"
+          fi
+          keytool -genkeypair -v -keystore android.keystore -storepass "$BUBBLEWRAP_KEYSTORE_PASSWORD" -keypass "$BUBBLEWRAP_KEY_PASSWORD" -alias listen-score -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Listen Score, OU=IRPA, O=IRPA, L=Longido, ST=Arusha, C=TZ"
+          mkdir -p "$HOME/.bubblewrap"
+          printf '{"jdkPath":"%s","androidSdkPath":"%s"}\n' "$JAVA_HOME" "$ANDROID_HOME" > "$HOME/.bubblewrap/config.json"
+
+      - name: Serve generated PNG icon locally
+        shell: bash
+        run: |
+          python3 -m http.server 8765 --bind 127.0.0.1 >/tmp/listen-score-icon-server.log 2>&1 &
+          echo $! > /tmp/listen-score-icon-server.pid
+          for i in {1..20}; do
+            if curl -fsS http://127.0.0.1:8765/icon-512.png -o /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/listen-score-icon-server.log
+          exit 1
+
+      - name: Configure and build Trusted Web Activity
+        shell: bash
+        env:
+          BUBBLEWRAP_KEYSTORE_PASSWORD: ${{ secrets.BUBBLEWRAP_KEYSTORE_PASSWORD }}
+          BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.BUBBLEWRAP_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BUBBLEWRAP_KEYSTORE_PASSWORD" ]; then
+            BUBBLEWRAP_KEYSTORE_PASSWORD="$(grep '^BUBBLEWRAP_KEYSTORE_PASSWORD=' "$GITHUB_ENV" | tail -1 | cut -d= -f2-)"
+          fi
+          if [ -z "$BUBBLEWRAP_KEY_PASSWORD" ]; then
+            BUBBLEWRAP_KEY_PASSWORD="$BUBBLEWRAP_KEYSTORE_PASSWORD"
+          fi
+          export BUBBLEWRAP_KEYSTORE_PASSWORD BUBBLEWRAP_KEY_PASSWORD
+          cat > twa-manifest.json <<'JSON'
+          {
+            "packageId": "io.github.irpa2412.listenscore",
+            "host": "irpa2412-bit.github.io",
+            "name": "Listen & Score",
+            "launcherName": "Listen Score",
+            "startUrl": "/listen-score/",
+            "webManifestUrl": "https://irpa2412-bit.github.io/listen-score/manifest.json",
+            "display": "standalone",
+            "fallbackType": "customtabs",
+            "themeColor": "#12203a",
+            "themeColorDark": "#12203a",
+            "backgroundColor": "#12203a",
+            "navigationColor": "#12203a",
+            "iconUrl": "http://127.0.0.1:8765/icon-512.png",
+            "maskableIconUrl": "http://127.0.0.1:8765/icon-512.png",
+            "signingKey": {
+              "path": "android.keystore",
+              "alias": "listen-score"
+            },
+            "splashScreenFadeOutDuration": 300
+          }
+          JSON
+          bubblewrap update --skipVersionUpgrade --manifest=.
+          bubblewrap build --manifest=.
+          test -s app-release-signed.apk
+          test "$(stat -c%s app-release-signed.apk)" -gt 500000
+          cp app-release-signed.apk listen-score.apk
+          sha256sum listen-score.apk
+          stat -c 'APK size: %s bytes' listen-score.apk
+
+      - name: Publish latest GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: latest
+          files: listen-score.apk
+          make_latest: true
+          overwrite_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify published APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="https://github.com/irpa2412-bit/listen-score/releases/latest/download/listen-score.apk"
+          for attempt in {1..10}; do
+            code="$(curl -sS -L -o /tmp/listen-score-download.apk -w '%{http_code}' "$URL")"
+            size="$(stat -c%s /tmp/listen-score-download.apk 2>/dev/null || echo 0)"
+            echo "Release download HTTP $code; size $size bytes"
+            if [ "$code" = "200" ] && [ "$size" -gt 500000 ]; then
+              exit 0
+            fi
+            sleep 3
+          done
+          exit 1

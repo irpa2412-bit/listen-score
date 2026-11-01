@@ -85,18 +85,6 @@ jobs:
           mkdir -p "$HOME/.bubblewrap"
           printf '{"jdkPath":"%s","androidSdkPath":"%s"}\n' "$JAVA_HOME" "$ANDROID_HOME" > "$HOME/.bubblewrap/config.json"
 
-      - name: Serve generated PNG icon locally
-        shell: bash
-        run: |
-          python3 -m http.server 8765 --bind 127.0.0.1 >/tmp/listen-score-icon-server.log 2>&1 &
-          echo $! > /tmp/listen-score-icon-server.pid
-          for i in {1..20}; do
-            if curl -fsS http://127.0.0.1:8765/icon-512.png -o /dev/null; then exit 0; fi
-            sleep 1
-          done
-          cat /tmp/listen-score-icon-server.log
-          exit 1
-
       - name: Configure and build Trusted Web Activity
         shell: bash
         env:
@@ -111,9 +99,17 @@ jobs:
             BUBBLEWRAP_KEY_PASSWORD="$BUBBLEWRAP_KEYSTORE_PASSWORD"
           fi
           export BUBBLEWRAP_KEYSTORE_PASSWORD BUBBLEWRAP_KEY_PASSWORD
+          python3 -m http.server 8765 --bind 127.0.0.1 >/tmp/listen-score-icon-server.log 2>&1 &
+          ICON_SERVER_PID=$!
+          trap 'kill "$ICON_SERVER_PID" 2>/dev/null || true' EXIT
+          for i in {1..20}; do
+            if curl -fsS http://127.0.0.1:8765/icon-512.png -o /dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8765/icon-512.png -o /dev/null
           cat > twa-manifest.json <<'JSON'
           {
-            "packageId": "io.github.irpa2412.listenscore",
+            "packageId": "io.irpa2412.listenscore",
             "host": "irpa2412-bit.github.io",
             "name": "Listen & Score",
             "launcherName": "Listen Score",

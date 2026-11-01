@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#12203a">
+<link rel="manifest" href="manifest.json"><link rel="icon" href="icon.svg">
+<title>Listen &amp; Score</title>
+<style>
+:root{--bg:#12203a;--panel:#1b2d4f;--ink:#e8eefc;--dim:#8fa3c8;--acc:#5fd6c4;--rec:#ff5d6c}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,sans-serif;padding:env(safe-area-inset-top) 14px env(safe-area-inset-bottom);max-width:720px;margin:auto}
+h1{font-size:20px;margin:14px 0 2px}#msg{color:var(--dim);font-size:14px;min-height:20px;margin-bottom:8px}
+.row{display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+button,select,input{padding:12px 8px;border-radius:12px;border:0;background:var(--panel);color:var(--ink);font-size:15px;min-width:0}
+button{flex:1}button:disabled{opacity:.4}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--acc)}
+#rec{background:var(--rec);font-weight:700}#rec.on{animation:p 1s infinite}@keyframes p{50%{opacity:.65}}
+#up{flex:1;text-align:center;padding:12px 8px;border-radius:12px;background:var(--panel);cursor:pointer}
+details{background:var(--panel);border-radius:12px;padding:10px 12px;margin-bottom:8px}summary{cursor:pointer}
+label{display:flex;align-items:center;gap:8px;margin:8px 0;font-size:14px;color:var(--dim)}label input,label select{flex:1;background:var(--bg)}
+progress{width:100%;height:8px;display:none}
+#score{background:#fff;color:#000;border-radius:12px;overflow-x:auto;min-height:60px}
+@media print{body{background:#fff}body>*:not(#score){display:none!important}#score{overflow:visible}}
+</style></head><body>
+<h1>Listen &amp; Score</h1>
+<div id="msg">Record the music or choose an audio file. It will be turned into staff notation.</div>
+<div class="row"><button id="rec">Record</button><label id="up" for="file">Open audio file</label><input id="file" type="file" accept="audio/*" hidden></div>
+<progress id="pg" max="100" value="0"></progress>
+<details><summary>Parts, names and tempo</summary>
+<label>Tempo (beats per minute)<input id="bpm" type="number" value="90" min="40" max="200"></label>
+<label>Time signature<select id="ts"><option value="4">4/4</option><option value="3">3/4</option><option value="2">2/4</option></select></label>
+<label>Part 1 (highest) name<input id="n3" value="Soprano"></label>
+<label>Part 2 name<input id="n2" value="Alto"></label>
+<label>Part 3 name<input id="n1" value="Tenor"></label>
+<label>Part 4 (lowest) name<input id="n0" value="Bass"></label>
+<label>Split: Bass below MIDI note<input id="c0" type="number" value="52"></label>
+<label>Split: Tenor below<input id="c1" type="number" value="60"></label>
+<label>Split: Alto below (above = Soprano)<input id="c2" type="number" value="68"></label>
+<div style="font-size:13px;color:var(--dim)">Type an instrument name in any part. Middle C = 60. Change the numbers if voices land in the wrong part.</div>
+<div class="row" style="margin-top:8px"><button id="upd" disabled>Update score</button></div>
+</details>
+<div class="row"><button id="play" disabled>Play</button><button id="mid" disabled>MIDI</button><button id="xml" disabled>MusicXML</button><button id="prt" disabled>Print / PDF</button></div>
+<div id="score"></div>
+<script src="https://cdn.jsdelivr.net/npm/opensheetmusicdisplay@2.2.1/build/opensheetmusicdisplay.min.js"></script>
+<script>
+const SH=[['C',0],['C',1],['D',0],['D',1],['E',0],['F',0],['F',1],['G',0],['G',1],['A',0],['A',1],['B',0]],
+ FL=[['C',0],['D',-1],['D',0],['E',-1],['E',0],['F',0],['G',-1],['G',0],['A',-1],['A',0],['B',-1],['B',0]];
+const FIFTHS=[0,-5,2,-3,4,-1,6,1,-4,3,-2,5],MAJ=[6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88],MIN=[6.33,2.68,3.52,5.38,2.60,3.53,2.54,4.75,3.98,2.69,3.34,3.17];
+const DUR=[[16,'whole',0],[12,'half',1],[8,'half',0],[6,'quarter',1],[4,'quarter',0],[3,'eighth',1],[2,'eighth',0],[1,'16th',0]];
+const esc=s=>String(s).replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+function detectKey(notes){
+ const h=Array(12).fill(0);notes.forEach(n=>h[n.m%12]+=n.d);
+ const cor=(p,t)=>{const mp=p.reduce((x,y)=>x+y)/12,mh=h.reduce((x,y)=>x+y)/12;let a=0,b=0,c=0;
+  for(let k=0;k<12;k++){const x=p[(k-t+12)%12]-mp,y=h[k]-mh;a+=x*y;b+=x*x;c+=y*y}return a/Math.sqrt(b*c||1)};
+ let best={t:0,minor:false,s:-9};
+ for(let t=0;t<12;t++)for(const mi of[false,true]){const s=cor(mi?MIN:MAJ,t);if(s>best.s)best={t,minor:mi,s}}
+ return best}
+function splitDur(d){const o=[];while(d>0){const x=DUR.find(z=>z[0]<=d);o.push(x);d-=x[0]}return o}
+function noteXml(m,piece,fifths,chord,tie){
+ const sp=(fifths<0?FL:SH)[m%12];
+ return '<note>'+(chord?'<chord/>':'')+'<pitch><step>'+sp[0]+'</step>'+(sp[1]?'<alter>'+sp[1]+'</alter>':'')+'<octave>'+(Math.floor(m/12)-1)+'</octave></pitch><duration>'+piece[0]+'</duration>'
+ +(tie.stop?'<tie type="stop"/>':'')+(tie.start?'<tie type="start"/>':'')+'<type>'+piece[1]+'</type>'+(piece[2]?'<dot/>':'')
+ +((tie.stop||tie.start)?'<notations>'+(tie.stop?'<tied type="stop"/>':'')+(tie.start?'<tied type="start"/>':'')+'</notations>':'')+'</note>'}
+function partMeasures(notes,M,nMeas,fifths){
+ const ns=notes.slice().sort((a,b)=>a.s-b.s||a.m-b.m),groups=[];
+ ns.forEach(n=>{const g=groups[groups.length-1];if(g&&g.s===n.s){g.ms.push(n.m);g.d=Math.min(g.d,n.d)}else groups.push({s:n.s,d:n.d,ms:[n.m]})});
+ groups.forEach((g,i)=>{if(i<groups.length-1)g.d=Math.min(g.d,groups[i+1].s-g.s);g.d=Math.max(1,g.d)});
+ const items=[];let pos=0;
+ groups.forEach(g=>{if(g.s>pos)items.push({rest:1,s:pos,d:g.s-pos});items.push({rest:0,s:g.s,d:g.d,ms:g.ms});pos=g.s+g.d});
+ if(pos<nMeas*M)items.push({rest:1,s:pos,d:nMeas*M-pos});
+ const out=Array.from({length:nMeas},()=>[]);
+ items.forEach(it=>{let s=it.s,left=it.d,first=true;
+  while(left>0){const mi=Math.floor(s/M),chunk=Math.min(left,(mi+1)*M-s),ps=splitDur(chunk);
+   ps.forEach((p,k)=>{const lastPiece=left-chunk<=0&&k===ps.length-1,tie={stop:!first,start:!lastPiece};
+    if(it.rest){out[mi].push(chunk===M&&s%M===0?'<note><rest measure="yes"/><duration>'+M+'</duration></note>':'<note><rest/><duration>'+p[0]+'</duration><type>'+p[1]+'</type>'+(p[2]?'<dot/>':'')+'</note>')}
+    else it.ms.forEach((m,j)=>out[mi].push(noteXml(m,p,fifths,j>0,tie)));
+    first=false});
+   s+=chunk;left-=chunk}});
+ return out.map(a=>a.join(''))}
+function buildXML(parts,o){
+ const M=o.beats*4,end=Math.max(1,...parts.flatMap(p=>p.notes.map(n=>n.s+n.d))),nMeas=Math.ceil(end/M),key=detectKey(parts.flatMap(p=>p.notes));
+ const fifths=FIFTHS[key.minor?(key.t+3)%12:key.t],clefs={S:'<sign>G</sign><line>2</line>',T:'<sign>G</sign><line>2</line><clef-octave-change>-1</clef-octave-change>',B:'<sign>F</sign><line>4</line>'};
+ let x='<?xml version="1.0" encoding="UTF-8"?><score-partwise version="3.1"><work><work-title>'+esc(o.title)+'</work-title></work><part-list>'
+ +parts.map((p,i)=>'<score-part id="P'+(i+1)+'"><part-name>'+esc(p.name)+'</part-name></score-part>').join('')+'</part-list>';
+ parts.forEach((p,i)=>{const ms=partMeasures(p.notes,M,nMeas,fifths);
+  x+='<part id="P'+(i+1)+'">'+ms.map((c,k)=>'<measure number="'+(k+1)+'">'+(k===0?'<attributes><divisions>4</divisions><key><fifths>'+fifths+'</fifths></key><time><beats>'+o.beats+'</beats><beat-type>4</beat-type></time><clef>'+clefs[p.clef]+'</clef></attributes>'
+   +(i===0?'<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>'+o.bpm+'</per-minute></metronome></direction-type><sound tempo="'+o.bpm+'"/></direction>':''):'')+c+'</measure>').join('')+'</part>'});
+ return{xml:x+'</score-partwise>',key:key,fifths:fifths}}
+function makeParts(raw,o){
+ const g=60/o.bpm/4,P=[{k:'B',clef:'B'},{k:'T',clef:'T'},{k:'A',clef:'S'},{k:'S',clef:'S'}].map((p,i)=>({name:o.names[i],clef:p.clef,notes:[]}));
+ raw.forEach(n=>{const m=Math.round(n.pitchMidi),i=m<o.cuts[0]?0:m<o.cuts[1]?1:m<o.cuts[2]?2:3;
+  P[i].notes.push({m,s:Math.round(n.startTimeSeconds/g),d:Math.max(1,Math.round(n.durationSeconds/g))})});
+ return P.filter(p=>p.notes.length).reverse()}
+function midiBlob(parts,bpm){
+ const ppq=480,e=ppq/4,ev=[];
+ parts.forEach((p,i)=>p.notes.forEach(n=>{ev.push({t:n.s*e,b:[0x90|i,n.m,90],o:1});ev.push({t:(n.s+n.d)*e,b:[0x80|i,n.m,0],o:0})}));
+ ev.sort((a,b)=>a.t-b.t||a.o-b.o);
+ const mpq=Math.round(6e7/bpm),tr=[0,0xFF,0x51,3,mpq>>16&255,mpq>>8&255,mpq&255];
+ parts.forEach((p,i)=>tr.push(0,0xC0|i,52));
+ let q=0;ev.forEach(x=>{let dl=x.t-q;q=x.t;const v=[dl&127];while(dl>>=7)v.unshift((dl&127)|128);tr.push(...v,...x.b)});
+ tr.push(0,0xFF,0x2F,0);const L=tr.length;
+ return new Blob([new Uint8Array([0x4d,0x54,0x68,0x64,0,0,0,6,0,1,0,1,ppq>>8,ppq&255,0x4d,0x54,0x72,0x6b,L>>24&255,L>>16&255,L>>8&255,L&255,...tr])],{type:'audio/midi'})}
+const $=id=>document.getElementById(id),msg=s=>$('msg').textContent=s;
+let BP,raw=[],parts=[],xmlStr='',bp,osmd,ctx,rec,chunks=[],playing=[];
+const opts=()=>({bpm:+$('bpm').value||90,beats:+$('ts').value,title:'Transcription',cuts:[+$('c0').value,+$('c1').value,+$('c2').value],names:[$('n0').value,$('n1').value,$('n2').value,$('n3').value]});
+async function loadBP(){msg('Loading the transcription engine (first time only)…');for(const u of['https://cdn.jsdelivr.net/npm/@spotify/basic-pitch@1.0.1/+esm','https://esm.sh/@spotify/basic-pitch@1.0.1']){try{return await import(u)}catch(e){}}throw new Error('engine did not load. Check your internet connection')}
+async function transcribe(arrayBuf){
+ try{
+  msg('Reading audio…');
+  const ac=new(window.AudioContext||window.webkitAudioContext)({sampleRate:22050});
+  const buf=await ac.decodeAudioData(arrayBuf);ac.close();
+  const data=buf.getChannelData(0);
+  BP=BP||await loadBP();bp=bp||new BP.BasicPitch('https://cdn.jsdelivr.net/npm/@spotify/basic-pitch@1.0.1/model/model.json');
+  const F=[],O=[],C=[];$('pg').style.display='block';$('pg').value=0;
+  msg('Listening to every part… keep this page open.');
+  await bp.evaluateModel(data,(f,o,c)=>{F.push(...f);O.push(...o);C.push(...c)},p=>$('pg').value=Math.round(p*100));
+  raw=BP.noteFramesToTime(BP.outputToNotesPoly(F,O,0.3,0.3,8)).filter(n=>n.durationSeconds>=0.1);
+  $('pg').style.display='none';
+  if(!raw.length){msg('No clear notes found. Try a clearer or louder recording.');return}
+  await render();
+ }catch(e){$('pg').style.display='none';msg('Could not process this audio: '+e.message)}}
+async function render(){
+ const o=opts();parts=makeParts(raw,o);
+ const r=buildXML(parts,o);xmlStr=r.xml;
+ try{
+  osmd=osmd||new opensheetmusicdisplay.OpenSheetMusicDisplay('score',{autoResize:true,drawTitle:true,drawPartNames:true});
+  await osmd.load(xmlStr);osmd.render();
+ }catch(e){msg('Score drawing failed: '+e.message+'. You can still save the MusicXML.')}
+ msg(parts.length+' part(s) · key '+['C','Db','D','Eb','E','F','F#','G','Ab','A','Bb','B'][r.key.t]+(r.key.minor?' minor':' major')+' · '+raw.length+' notes. Check tempo, then tap Update score.');
+ ['play','mid','xml','prt','upd'].forEach(i=>$(i).disabled=false)}
+$('upd').onclick=()=>render();
+$('file').onchange=async e=>{const f=e.target.files[0];if(f)transcribe(await f.arrayBuffer());e.target.value=''};
+$('rec').onclick=async()=>{
+ if(rec&&rec.state==='recording'){rec.stop();return}
+ try{const s=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+  chunks=[];rec=new MediaRecorder(s);rec.ondataavailable=e=>chunks.push(e.data);
+  rec.onstop=async()=>{s.getTracks().forEach(t=>t.stop());$('rec').classList.remove('on');$('rec').textContent='Record';clearInterval(tm);transcribe(await new Blob(chunks).arrayBuffer())};
+  rec.start();$('rec').classList.add('on');const t0=Date.now();
+  var tm=setInterval(()=>$('rec').textContent='Stop '+Math.floor((Date.now()-t0)/1000)+'s',500);$('rec').textContent='Stop 0s';
+ }catch(e){msg('Microphone blocked. Allow it in Chrome: Site settings > Microphone.')}};
+function stopPlay(){playing.forEach(o=>{try{o.stop()}catch(e){}});playing=[];$('play').textContent='Play'}
+$('play').onclick=async()=>{
+ if(playing.length)return stopPlay();
+ ctx=ctx||new(window.AudioContext||window.webkitAudioContext)();await ctx.resume();
+ const g=60/opts().bpm/4,t=ctx.currentTime+.1;let end=0;
+ parts.forEach(p=>p.notes.forEach(n=>{const o=ctx.createOscillator(),a=ctx.createGain(),s=t+n.s*g,d=n.d*g;
+  o.type='triangle';o.frequency.value=440*2**((n.m-69)/12);a.gain.setValueAtTime(0,s);a.gain.linearRampToValueAtTime(.12,s+.02);a.gain.setValueAtTime(.12,s+Math.max(.03,d-.05));a.gain.linearRampToValueAtTime(0,s+d);
+  o.connect(a);a.connect(ctx.destination);o.start(s);o.stop(s+d+.05);playing.push(o);end=Math.max(end,s+d)}));
+ $('play').textContent='Stop';setTimeout(()=>{if(ctx.currentTime>=end-.1)stopPlay()},(end-ctx.currentTime+.3)*1000)};
+const save=(blob,name)=>{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click()};
+$('mid').onclick=()=>save(midiBlob(parts,opts().bpm),'transcription.mid');
+$('xml').onclick=()=>save(new Blob([xmlStr],{type:'application/vnd.recordare.musicxml+xml'}),'transcription.musicxml');
+$('prt').onclick=()=>print();
+if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
+</script></body></html>

@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  pages: write
 
 jobs:
   build-apk:
@@ -18,15 +19,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Enable GitHub Pages from main root if not configured
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh api --method POST "repos/$GITHUB_REPOSITORY/pages" -f 'source[branch]=main' -f 'source[path]=/' >/dev/null 2>&1; then
+            gh api "repos/$GITHUB_REPOSITORY/pages" >/dev/null
+          fi
+
       - name: Verify live PWA endpoints
         shell: bash
         run: |
           set -euo pipefail
           BASE="https://irpa2412-bit.github.io/listen-score"
           for path in "/" "/manifest.json" "/icon.svg"; do
-            status="$(curl --retry 3 --retry-all-errors --retry-delay 2 -sS -L -o /dev/null -w '%{http_code}' "$BASE$path")"
-            echo "$path HTTP $status"
-            test "$status" = "200"
+            passed=0
+            for attempt in {1..36}; do
+              status="$(curl --retry 2 --retry-all-errors --retry-delay 2 -sS -L -o /dev/null -w '%{http_code}' "$BASE$path")"
+              echo "$path HTTP $status (attempt $attempt)"
+              if [ "$status" = "200" ]; then passed=1; break; fi
+              sleep 5
+            done
+            test "$passed" = "1"
           done
 
       - name: Set up Java 17

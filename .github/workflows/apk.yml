@@ -71,21 +71,6 @@ jobs:
         run: |
           set -euo pipefail
           rsvg-convert -w 512 -h 512 icon.svg -o icon-512.png
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add icon-512.png
-          if ! git diff --cached --quiet; then
-            git commit -m "Add generated 512px Android launcher icon"
-            git push origin HEAD:main
-          fi
-          ICON_URL="https://irpa2412-bit.github.io/listen-score/icon-512.png"
-          for attempt in {1..36}; do
-            status="$(curl -sS -L -o /dev/null -w '%{http_code}' "$ICON_URL")"
-            echo "Generated launcher icon HTTP $status (attempt $attempt)"
-            if [ "$status" = "200" ]; then break; fi
-            sleep 5
-          done
-          test "$status" = "200"
           if [ -z "$BUBBLEWRAP_KEYSTORE_PASSWORD" ]; then
             BUBBLEWRAP_KEYSTORE_PASSWORD="$(openssl rand -hex 24)"
             echo "::add-mask::$BUBBLEWRAP_KEYSTORE_PASSWORD"
@@ -107,6 +92,15 @@ jobs:
           : "${BUBBLEWRAP_KEYSTORE_PASSWORD:?Signing password was not passed from the key-generation step}"
           : "${BUBBLEWRAP_KEY_PASSWORD:?Signing key password was not passed from the key-generation step}"
           export BUBBLEWRAP_KEYSTORE_PASSWORD BUBBLEWRAP_KEY_PASSWORD
+          python3 -m http.server 18765 --bind 127.0.0.1 --directory "$GITHUB_WORKSPACE" >/tmp/listen-score-icon-server.log 2>&1 &
+          ICON_SERVER_PID=$!
+          trap 'kill "$ICON_SERVER_PID" 2>/dev/null || true' EXIT
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:18765/icon-512.png -o /dev/null; then break; fi
+            if ! kill -0 "$ICON_SERVER_PID" 2>/dev/null; then cat /tmp/listen-score-icon-server.log; exit 1; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18765/icon-512.png -o /dev/null || { cat /tmp/listen-score-icon-server.log; exit 1; }
           cat > twa-manifest.json <<'JSON'
           {
             "packageId": "io.irpa2412.listenscore",
@@ -121,8 +115,8 @@ jobs:
             "themeColorDark": "#12203a",
             "backgroundColor": "#12203a",
             "navigationColor": "#12203a",
-            "iconUrl": "https://irpa2412-bit.github.io/listen-score/icon-512.png",
-            "maskableIconUrl": "https://irpa2412-bit.github.io/listen-score/icon-512.png",
+            "iconUrl": "http://127.0.0.1:18765/icon-512.png",
+            "maskableIconUrl": "http://127.0.0.1:18765/icon-512.png",
             "signingKey": {
               "path": "android.keystore",
               "alias": "listen-score"

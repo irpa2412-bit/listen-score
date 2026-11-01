@@ -93,8 +93,8 @@ jobs:
           fi
           keytool -genkeypair -v -keystore android.keystore -storepass "$BUBBLEWRAP_KEYSTORE_PASSWORD" -keypass "$BUBBLEWRAP_KEY_PASSWORD" -alias listen-score -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Listen Score, OU=IRPA, O=IRPA, L=Longido, ST=Arusha, C=TZ"
           mkdir -p "$HOME/.bubblewrap"
-          # Bubblewrap's SDK validator requires a top-level "build" entry.
-          ln -sfn "$ANDROID_HOME/build-tools" "$ANDROID_HOME/build"
+          # Bubblewrap expects a legacy SDK bin/sdkmanager path at the SDK root.
+          ln -sfn "$ANDROID_HOME/cmdline-tools/latest/bin" "$ANDROID_HOME/bin"
           printf '{"jdkPath":"%s","androidSdkPath":"%s"}\n' "$JAVA_HOME" "$ANDROID_HOME" > "$HOME/.bubblewrap/config.json"
           bubblewrap doctor
           echo "ANDROID_HOME=$ANDROID_HOME"

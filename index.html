@@ -23,18 +23,16 @@ progress{width:100%;height:8px;display:none}
 <div id="msg">Record the music or choose an audio file. It will be turned into staff notation.</div>
 <div class="row"><button id="rec">Record</button><button id="clip" disabled>Save clip</button><label id="up" for="file">Open audio file</label><input id="file" type="file" accept="audio/*" hidden></div>
 <progress id="pg" max="100" value="0"></progress>
-<details><summary>Parts, names and tempo</summary>
-<label>Tempo (auto-detected, editable)<input id="bpm" type="number" value="90" min="40" max="200"></label>
+<details><summary>Settings (all automatic, editable)</summary>
+<label>Tempo<input id="bpm" type="number" value="90" min="40" max="200"></label>
 <label>Time signature<select id="ts"><option value="4">4/4</option><option value="3">3/4</option><option value="2">2/4</option></select></label>
+<label>Key<select id="key"><option value="-1" selected>Auto-detect</option><option value="0">C major</option><option value="1">D♭ major</option><option value="2">D major</option><option value="3">E♭ major</option><option value="4">E major</option><option value="5">F major</option><option value="6">F♯ major</option><option value="7">G major</option><option value="8">A♭ major</option><option value="9">A major</option><option value="10">B♭ major</option><option value="11">B major</option><option value="12">C minor</option><option value="13">D♭ minor</option><option value="14">D minor</option><option value="15">E♭ minor</option><option value="16">E minor</option><option value="17">F minor</option><option value="18">F♯ minor</option><option value="19">G minor</option><option value="20">A♭ minor</option><option value="21">A minor</option><option value="22">B♭ minor</option><option value="23">B minor</option></select></label>
 <label>Sensitivity<select id="sens"><option value="0">Normal</option><option value="1" selected>High</option><option value="2">Maximum</option></select></label>
-<label>Part 1 (highest) name<input id="n3" value="Soprano"></label>
-<label>Part 2 name<input id="n2" value="Alto"></label>
-<label>Part 3 name<input id="n1" value="Tenor"></label>
-<label>Part 4 (lowest) name<input id="n0" value="Bass"></label>
-<label>Split: Bass below MIDI note<input id="c0" type="number" value="52"></label>
-<label>Split: Tenor below<input id="c1" type="number" value="60"></label>
-<label>Split: Alto below (above = Soprano)<input id="c2" type="number" value="68"></label>
-<div style="font-size:13px;color:var(--dim)">Type an instrument name in any part. Middle C = 60. Change the numbers if voices land in the wrong part.</div>
+<label>Upper staff name<input id="n1" value="Right hand"></label>
+<label>Lower staff name<input id="n0" value="Left hand"></label>
+<label>Lower staff below MIDI note<input id="c0" type="number" value="60"></label>
+<label>Snap notes to the key<select id="snap"><option value="0" selected>No (keep every heard note)</option><option value="1">Yes</option></select></label>
+<div style="font-size:13px;color:var(--dim)">Middle C = 60. Every note heard is written, including chords. The score updates every few seconds while you record.</div>
 <div class="row" style="margin-top:8px"><button id="upd" disabled>Update score</button></div>
 </details>
 <div class="row"><button id="play" disabled>Play</button><button id="mid" disabled>MIDI</button><button id="xml" disabled>MusicXML</button><button id="prt" disabled>Print / PDF</button></div>
@@ -76,7 +74,7 @@ function partMeasures(notes,M,nMeas,fifths){
    s+=chunk;left-=chunk}});
  return out.map(a=>a.join(''))}
 function buildXML(parts,o){
- const M=o.beats*4,end=Math.max(1,...parts.flatMap(p=>p.notes.map(n=>n.s+n.d))),nMeas=Math.ceil(end/M),key=detectKey(parts.flatMap(p=>p.notes));
+ const M=o.beats*4,end=Math.max(1,...parts.flatMap(p=>p.notes.map(n=>n.s+n.d))),nMeas=Math.ceil(end/M),key=o.keyObj||detectKey(parts.flatMap(p=>p.notes));
  const fifths=FIFTHS[key.minor?(key.t+3)%12:key.t],clefs={S:'<sign>G</sign><line>2</line>',T:'<sign>G</sign><line>2</line><clef-octave-change>-1</clef-octave-change>',B:'<sign>F</sign><line>4</line>'};
  let x='<?xml version="1.0" encoding="UTF-8"?><score-partwise version="3.1"><work><work-title>'+esc(o.title)+'</work-title></work><part-list>'
  +parts.map((p,i)=>'<score-part id="P'+(i+1)+'"><part-name>'+esc(p.name)+'</part-name></score-part>').join('')+'</part-list>';
@@ -91,69 +89,103 @@ function estimateBpm(raw){let best=90,bs=-1;
   const sc=Math.hypot(c,s)/raw.length*Math.exp(-Math.pow(Math.log2(b/100),2)/.245);if(sc>bs){bs=sc;best=b}}
  return best}
 function makeParts(raw,o){
- const g=60/o.bpm/4,t0=Math.min(...raw.map(n=>n.startTimeSeconds)),P=[{clef:'B'},{clef:'T'},{clef:'S'},{clef:'S'}].map((p,i)=>({name:o.names[i],clef:p.clef,notes:[]}));
- raw.forEach(n=>{const m=Math.round(n.pitchMidi),i=m<o.cuts[0]?0:m<o.cuts[1]?1:m<o.cuts[2]?2:3;
+ const g=60/o.bpm/4,t0=Math.min(...raw.map(n=>n.startTimeSeconds))-(o.pad||0)*60/o.bpm,P=[{clef:'S',name:o.names[1]},{clef:'B',name:o.names[0]}].map(p=>({name:p.name,clef:p.clef,notes:[]}));
+ raw.forEach(n=>{const m=Math.round(n.pitchMidi),i=m<o.cuts[0]?1:0;
   P[i].notes.push({m,a:n.amplitude||0,s:Math.round((n.startTimeSeconds-t0)/g),d:Math.max(1,Math.round(n.durationSeconds/g))})});
- P.forEach(p=>{p.notes.sort((a,b)=>a.s-b.s||b.a-a.a);const one=[];
-  p.notes.forEach(n=>{if(!one.length||one[one.length-1].s!==n.s)one.push(n)});
-  one.forEach((n,k)=>{const nx=one[k+1];if(nx){const gap=nx.s-(n.s+n.d);if(gap>0&&gap<=2)n.d=nx.s-n.s}n.d=snapD(n.d)});
-  p.notes=one});
- return P.filter(p=>p.notes.length).reverse()}
+ P.forEach(p=>{p.notes.sort((a,b)=>a.s-b.s||b.a-a.a);const by={};
+  p.notes.forEach(n=>{(by[n.s]=by[n.s]||[]).push(n)});
+  const out=[];Object.keys(by).map(Number).sort((a,b)=>a-b).forEach(s=>{const seen={};by[s].filter(n=>!seen[n.m]&&(seen[n.m]=1)).slice(0,4).forEach(n=>out.push(n))});
+  const starts=[...new Set(out.map(n=>n.s))];
+  out.forEach(n=>{const k=starts.indexOf(n.s),nx=starts[k+1];if(nx!==undefined){const gap=nx-(n.s+n.d);if(gap>0&&gap<=2)n.d=nx-n.s}n.d=snapD(n.d)});
+  p.notes=out});
+ return P.filter(p=>p.notes.length)}
 function midiBlob(parts,bpm){
  const ppq=480,e=ppq/4,ev=[];
  parts.forEach((p,i)=>p.notes.forEach(n=>{ev.push({t:n.s*e,b:[0x90|i,n.m,90],o:1});ev.push({t:(n.s+n.d)*e,b:[0x80|i,n.m,0],o:0})}));
  ev.sort((a,b)=>a.t-b.t||a.o-b.o);
  const mpq=Math.round(6e7/bpm),tr=[0,0xFF,0x51,3,mpq>>16&255,mpq>>8&255,mpq&255];
- parts.forEach((p,i)=>tr.push(0,0xC0|i,52));
+ parts.forEach((p,i)=>tr.push(0,0xC0|i,0));
  let q=0;ev.forEach(x=>{let dl=x.t-q;q=x.t;const v=[dl&127];while(dl>>=7)v.unshift((dl&127)|128);tr.push(...v,...x.b)});
  tr.push(0,0xFF,0x2F,0);const L=tr.length;
  return new Blob([new Uint8Array([0x4d,0x54,0x68,0x64,0,0,0,6,0,1,0,1,ppq>>8,ppq&255,0x4d,0x54,0x72,0x6b,L>>24&255,L>>16&255,L>>8&255,L&255,...tr])],{type:'audio/midi'})}
 const $=id=>document.getElementById(id),msg=s=>$('msg').textContent=s;
-let BP,lastF,lastO,autoT=false,clipBlob,raw=[],parts=[],xmlStr='',bp,osmd,ctx,rec,chunks=[],playing=[];
-const opts=()=>({bpm:+$('bpm').value||90,beats:+$('ts').value,title:'Transcription',cuts:[+$('c0').value,+$('c1').value,+$('c2').value],names:[$('n0').value,$('n1').value,$('n2').value,$('n3').value]});
+let BP,bp,F=[],O=[],autoT=false,clipBlob,raw=[],parts=[],xmlStr='',osmd,ctx,rec,chunks=[],playing=[],busy=false,padBeats=0,live=null;
+const opts=()=>({key:+$('key').value,bpm:+$('bpm').value||90,beats:+$('ts').value,title:'Transcription',cuts:[+$('c0').value],names:[$('n0').value,$('n1').value]});
 async function loadBP(){msg('Loading the transcription engine (first time only)…');for(const u of['https://cdn.jsdelivr.net/npm/@spotify/basic-pitch@1.0.1/+esm','https://esm.sh/@spotify/basic-pitch@1.0.1']){try{return await import(u)}catch(e){}}throw new Error('engine did not load. Check your internet connection')}
-async function transcribe(arrayBuf){
+async function engine(){BP=BP||await loadBP();bp=bp||new BP.BasicPitch('https://cdn.jsdelivr.net/npm/@spotify/basic-pitch@1.0.1/model/model.json')}
+async function feed(data){
+ let pk=0;for(let i=0;i<data.length;i++){const v=Math.abs(data[i]);if(v>pk)pk=v}
+ if(pk>0.001&&pk<0.9){const k=Math.min(8,0.9/pk);data=data.map(v=>v*k)}
+ await bp.evaluateModel(data,(f,o,c)=>{for(const x of f)F.push(x);for(const x of o)O.push(x)},()=>{})}
+async function transcribeFile(arrayBuf){
  try{
+  if(busy)return;busy=true;F=[];O=[];await engine();
   msg('Reading audio…');
   const ac=new(window.AudioContext||window.webkitAudioContext)({sampleRate:22050});
   const buf=await ac.decodeAudioData(arrayBuf);ac.close();
-  let data=buf.getChannelData(0);let pk=0;for(let i=0;i<data.length;i++){const v=Math.abs(data[i]);if(v>pk)pk=v}if(pk>0.001&&pk<0.9){const k=Math.min(8,0.9/pk);data=data.map(v=>v*k)}
-  BP=BP||await loadBP();bp=bp||new BP.BasicPitch('https://cdn.jsdelivr.net/npm/@spotify/basic-pitch@1.0.1/model/model.json');
-  const F=[],O=[],C=[];$('pg').style.display='block';$('pg').value=0;
-  msg('Listening to every part… keep this page open.');
-  await bp.evaluateModel(data,(f,o,c)=>{F.push(...f);O.push(...o);C.push(...c)},p=>$('pg').value=Math.round(p*100));
-  lastF=F;lastO=O;autoT=true;$('pg').style.display='none';
-  await render();
- }catch(e){$('pg').style.display='none';msg('Could not process this audio: '+e.message)}}
-async function render(){
- if(lastF){const th=[[.5,.3],[.35,.25],[.25,.2]][+$('sens').value];raw=BP.noteFramesToTime(BP.outputToNotesPoly(lastF,lastO,th[0],th[1],6)).filter(n=>n.durationSeconds>=0.06)}
- if(!raw.length){msg('No clear notes found. Try Maximum sensitivity, or a louder, closer recording.');return}
- if(autoT){$('bpm').value=estimateBpm(raw);autoT=false}
- const o=opts();parts=makeParts(raw,o);
+  const data=buf.getChannelData(0),step=22050*4;
+  for(let s=0;s<data.length;s+=step){
+   await feed(data.slice(s,Math.min(data.length,s+step)));
+   autoT=true;await render('Writing… '+Math.round(Math.min(100,(s+step)/data.length*100))+'% · ')}
+  msg(document.getElementById('msg').textContent.replace('Writing… 100% · ',''));
+ }catch(e){msg('Could not process this audio: '+e.message)}finally{busy=false}}
+function detectMeter(raw,bpm){
+ const beat=60/bpm,t0=Math.min(...raw.map(n=>n.startTimeSeconds)),end=Math.max(...raw.map(n=>n.startTimeSeconds+n.durationSeconds)),nb=Math.ceil((end-t0)/beat)+2,acc=Array(nb).fill(0);
+ raw.forEach(n=>{const b=Math.round((n.startTimeSeconds-t0)/beat);if(b>=0&&b<nb)acc[b]+=(n.amplitude||.5)*(.5+Math.min(n.durationSeconds/beat,4)/4)});
+ const tot=acc.reduce((a,b)=>a+b,0)/nb||1;let best={L:4,p:0,s:-1e9};
+ for(const L of[4,3,2])for(let p=0;p<L;p++){let ds=0,dn=0,os=0,on=0;acc.forEach((v,i)=>{if(i%L===p){ds+=v;dn++}else{os+=v;on++}});
+  const sc=(ds/(dn||1)-os/(on||1))/tot-(L===2?.1:L===3?.05:0)-(p>0?.03:0);if(sc>best.s)best={L,p,s:sc}}
+ return{L:best.L,pad:(best.L-best.p)%best.L}}
+function keyFromSel(v,raw){if(v>=12)return{t:v-12,minor:true};if(v>=0)return{t:v,minor:false};
+ return detectKey(raw.map(n=>({m:Math.round(n.pitchMidi),d:Math.max(1,n.durationSeconds*10)})))}
+function snapKey(raw,k){const sc=(k.minor?[0,2,3,5,7,8,10,11]:[0,2,4,5,7,9,11]);
+ return raw.map(n=>{const m=Math.round(n.pitchMidi);let b=m,bd=9;for(let d=-2;d<=2;d++){if(sc.includes(((m+d-k.t)%12+12)%12)&&Math.abs(d)<bd){bd=Math.abs(d);b=m+d}}return Object.assign({},n,{pitchMidi:b})})}
+
+async function render(prefix){
+ prefix=prefix||'';
+ const th=[[.5,.3],[.35,.25],[.25,.2]][+$('sens').value];
+ if(!F.length){return}
+ raw=BP.noteFramesToTime(BP.outputToNotesPoly(F,O,th[0],th[1],6)).filter(n=>n.durationSeconds>=0.08&&(n.amplitude||0)>=0.2);
+ if(!raw.length){msg(prefix+'Listening… no clear notes yet.');return}
+ if(autoT){$('bpm').value=estimateBpm(raw);const mt=detectMeter(raw,+$('bpm').value);$('ts').value=mt.L;padBeats=mt.pad;autoT=false}
+ const o=opts();o.pad=padBeats;const kk=keyFromSel(o.key,raw);o.keyObj=kk;
+ const src=$('snap').value==='1'?snapKey(raw,kk):raw;parts=makeParts(src,o);
  const r=buildXML(parts,o);xmlStr=r.xml;
  try{
   osmd=osmd||new opensheetmusicdisplay.OpenSheetMusicDisplay('score',{autoResize:true,drawTitle:true,drawPartNames:true});
   await osmd.load(xmlStr);osmd.render();
  }catch(e){msg('Score drawing failed: '+e.message+'. You can still save the MusicXML.')}
- msg(parts.length+' part(s) · key '+['C','Db','D','Eb','E','F','F#','G','Ab','A','Bb','B'][r.key.t]+(r.key.minor?' minor':' major')+' · '+raw.length+' notes · tempo '+o.bpm+'. Edit tempo or sensitivity, then tap Update score.');
+ msg(prefix+'key '+['C','Db','D','Eb','E','F','F#','G','Ab','A','Bb','B'][r.key.t]+(r.key.minor?' minor':' major')+' · '+o.beats+'/4 · '+raw.length+' notes · tempo '+o.bpm);
  ['play','mid','xml','prt','upd'].forEach(i=>$(i).disabled=false)}
 $('upd').onclick=()=>render();
-$('file').onchange=async e=>{const f=e.target.files[0];if(f)transcribe(await f.arrayBuffer());e.target.value=''};
+$('file').onchange=async e=>{const f=e.target.files[0];if(f)transcribeFile(await f.arrayBuffer());e.target.value=''};
+async function liveStep(final){
+ if(busy&&!final)return;busy=true;
+ try{const n=live.buf.length;if(n>live.done){const all=new Float32Array(n-live.done);for(let i=live.done;i<n;i++)all[i-live.done]=live.buf[i];live.done=n;await feed(all);autoT=true;await render('Live · ')}}
+ finally{busy=false}}
 $('rec').onclick=async()=>{
  if(rec&&rec.state==='recording'){rec.stop();return}
- try{const s=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+ try{
+  await engine();F=[];O=[];
+  const s=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+  const ac=new(window.AudioContext||window.webkitAudioContext)({sampleRate:22050}),src=ac.createMediaStreamSource(s),sp=ac.createScriptProcessor(4096,1,1);
+  live={buf:[],done:0};
+  sp.onaudioprocess=e=>{const d=e.inputBuffer.getChannelData(0);for(let i=0;i<d.length;i++)live.buf.push(d[i])};
+  src.connect(sp);sp.connect(ac.destination);
   chunks=[];rec=new MediaRecorder(s,{audioBitsPerSecond:128000});rec.ondataavailable=e=>chunks.push(e.data);
-  rec.onstop=async()=>{s.getTracks().forEach(t=>t.stop());$('rec').classList.remove('on');$('rec').textContent='Record';clearInterval(tm);clipBlob=new Blob(chunks,{type:rec.mimeType||'audio/webm'});$('clip').disabled=false;transcribe(await clipBlob.arrayBuffer())};
-  rec.start();$('rec').classList.add('on');const t0=Date.now();
-  var tm=setInterval(()=>{$('rec').textContent='Stop '+Math.floor((Date.now()-t0)/1000)+'s';msg('Recording…')},500);$('rec').textContent='Stop 0s';
- }catch(e){msg('Microphone blocked. Allow it in Chrome: Site settings > Microphone.')}};
+  const tm=setInterval(()=>{$('rec').textContent='Stop '+Math.floor((Date.now()-t0)/1000)+'s';liveStep(false)},3000);
+  rec.onstop=async()=>{clearInterval(tm);s.getTracks().forEach(t=>t.stop());sp.disconnect();src.disconnect();ac.close();
+   $('rec').classList.remove('on');$('rec').textContent='Record';clipBlob=new Blob(chunks,{type:rec.mimeType||'audio/webm'});$('clip').disabled=false;
+   msg('Finishing…');while(busy)await new Promise(r=>setTimeout(r,200));await liveStep(true);autoT=true;await render('Final · ')};
+  rec.start();$('rec').classList.add('on');const t0=Date.now();$('rec').textContent='Stop 0s';msg('Recording… the score appears every few seconds.');
+ }catch(e){msg('Could not start: '+e.message+'. Allow the microphone in Chrome: Site settings > Microphone.')}};
 function stopPlay(){playing.forEach(o=>{try{o.stop()}catch(e){}});playing=[];$('play').textContent='Play'}
 $('play').onclick=async()=>{
  if(playing.length)return stopPlay();
  ctx=ctx||new(window.AudioContext||window.webkitAudioContext)();await ctx.resume();
  const g=60/opts().bpm/4,t=ctx.currentTime+.1;let end=0;
  parts.forEach(p=>p.notes.forEach(n=>{const o=ctx.createOscillator(),a=ctx.createGain(),s=t+n.s*g,d=n.d*g;
-  o.type='triangle';o.frequency.value=440*2**((n.m-69)/12);a.gain.setValueAtTime(0,s);a.gain.linearRampToValueAtTime(.12,s+.02);a.gain.setValueAtTime(.12,s+Math.max(.03,d-.05));a.gain.linearRampToValueAtTime(0,s+d);
+  o.type='triangle';o.frequency.value=440*2**((n.m-69)/12);a.gain.setValueAtTime(0,s);a.gain.linearRampToValueAtTime(.1,s+.02);a.gain.setValueAtTime(.1,s+Math.max(.03,d-.05));a.gain.linearRampToValueAtTime(0,s+d);
   o.connect(a);a.connect(ctx.destination);o.start(s);o.stop(s+d+.05);playing.push(o);end=Math.max(end,s+d)}));
  $('play').textContent='Stop';setTimeout(()=>{if(ctx.currentTime>=end-.1)stopPlay()},(end-ctx.currentTime+.3)*1000)};
 const save=(blob,name)=>{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.style.display='none';document.body.appendChild(a);a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(a.href)},5000)};

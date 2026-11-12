@@ -72,6 +72,7 @@ function partMeasures(notes,M,nMeas,fifths,small,origin=0){
   let written=0;
   segments.forEach(seg=>{
    const d=seg.e-seg.s;if(d<=0)return;
+   if(seg.rest&&d<small)throw Error('Gap below Smallest note; quantized starts should prevent this: '+d+' < '+small);
    const pieces=splitDur(d);let first=true;
    pieces.forEach((piece,k)=>{
     const last=k===pieces.length-1;

@@ -57,37 +57,38 @@ function buildBeatGrid(notes,bpm){const {groups}=tempoIntervals(notes),period=60
 function splitDur(d){const out=[];while(d>0){const x=DUR.find(z=>z[0]<=d)||DUR[DUR.length-1];out.push(x);d-=x[0]}return out}
 function snapD(d,small){const allowed=small===4?[4,8,12,16]:small===2?[2,3,4,6,8,12,16]:[1,2,3,4,6,8,12,16];return allowed.reduce((a,b)=>Math.abs(b-d)<Math.abs(a-d)?b:a,allowed[0])}
 function noteXml(m,piece,fifths,chord,tie){const sp=(fifths<0?FL:SH)[m%12];return '<note>'+(chord?'<chord/>':'')+'<pitch><step>'+sp[0]+'</step>'+(sp[1]?'<alter>'+sp[1]+'</alter>':'')+'<octave>'+(Math.floor(m/12)-1)+'</octave></pitch><duration>'+piece[0]+'</duration>'+(tie.stop?'<tie type="stop"/>':'')+(tie.start?'<tie type="start"/>':'')+'<type>'+piece[1]+'</type>'+(piece[2]?'<dot/>':'')+((tie.stop||tie.start)?'<notations>'+(tie.stop?'<tied type="stop"/>':'')+(tie.start?'<tied type="start"/>':'')+'</notations>':'')+'</note>'}
-function partMeasures(notes,M,nMeas,fifths,small){
+function partMeasures(notes,M,nMeas,fifths,small,origin=0){
  const ns=notes.slice().sort((a,b)=>a.s-b.s||a.m-b.m),groups=[];
  ns.forEach(n=>{let g=groups[groups.length-1];if(g&&g.s===n.s){if(!g.ms.includes(n.m))g.ms.push(n.m);g.d=Math.max(g.d,n.d)}else groups.push({s:n.s,d:n.d,ms:[n.m]})});
- groups.forEach((g,i)=>{g.d=Math.max(1,Math.min(g.d,(groups[i+1]?.s??nMeas*M)-g.s));});
+ groups.forEach((g,i)=>{g.d=Math.max(1,Math.min(g.d,(groups[i+1]?.s??(origin+nMeas*M))-g.s));});
  const out=Array.from({length:nMeas},()=>[]);
  for(let mi=0;mi<nMeas;mi++){
-  const start=mi*M,end=start+M,events=[];
-  groups.forEach(g=>{const a=Math.max(start,g.s),b=Math.min(end,g.s+g.d);if(b>a)events.push({s:a,e:b,rest:false,ms:g.ms})});
+  const start=origin+mi*M,end=start+M,events=[];
+  groups.forEach(g=>{const a=Math.max(start,g.s),b=Math.min(end,g.s+g.d);if(b>a)events.push({s:a,e:b,rest:false,ms:g.ms,group:g})});
   events.sort((a,b)=>a.s-b.s);
   let cursor=start,segments=[];
   events.forEach(ev=>{if(ev.s>cursor)segments.push({s:cursor,e:ev.s,rest:true});if(ev.e>cursor)segments.push({...ev,s:Math.max(cursor,ev.s)});cursor=Math.max(cursor,ev.e)});
   if(cursor<end)segments.push({s:cursor,e:end,rest:true});
-  // Measure repair: emit a complete, non-overlapping timeline of exactly M ticks.
   let written=0;
   segments.forEach(seg=>{
-   let d=seg.e-seg.s;if(d<=0)return;
-   if(seg.rest&&d<small&&segments.length>1){const prev=out[mi][out[mi].length-1];/* sub-small gaps are still represented at the minimum one-tick MusicXML granularity */}
-   const pieces=splitDur(d);pieces.forEach((piece,k)=>{
-    const dur=piece[0];
-    if(seg.rest)out[mi].push('<note><rest/><duration>'+dur+'</duration><type>'+piece[1]+'</type>'+(piece[2]?'<dot/>':'')+'</note>');
-    else seg.ms.forEach((m,j)=>out[mi].push(noteXml(m,piece,fifths,j>0,{stop:false,start:false})));
-    written+=dur;
+   const d=seg.e-seg.s;if(d<=0)return;
+   const pieces=splitDur(d);let first=true;
+   pieces.forEach((piece,k)=>{
+    const last=k===pieces.length-1;
+    if(seg.rest)out[mi].push('<note><rest/><duration>'+piece[0]+'</duration><type>'+piece[1]+'</type>'+(piece[2]?'<dot/>':'')+'</note>');
+    else seg.ms.forEach((m,j)=>out[mi].push(noteXml(m,piece,fifths,j>0,{stop:!first&&k===0,start:!last&&k===pieces.length-1})));
+    first=false;written+=piece[0];
    });
   });
-  if(written<M){const fix=splitDur(M-written);fix.forEach(p=>out[mi].push('<note><rest/><duration>'+p[0]+'</duration><type>'+p[1]+'</type>'+(p[2]?'<dot/>':'')+'</note>'));written+=M-written;}
-  // Defensive overfull repair: rebuild from clipped segments if arithmetic ever exceeds the bar.
-  if(written!==M)throw Error('Measure duration invariant failed: '+written+' / '+M+' ticks');
+  // Exact measure invariant: every tick is represented; sub-small residuals use
+  // the smallest available MusicXML unit (one sixteenth = one tick).
+  if(written<M){splitDur(M-written).forEach(p=>out[mi].push('<note><rest/><duration>'+p[0]+'</duration><type>'+p[1]+'</type>'+(p[2]?'<dot/>':'')+'</note>'));written=M;}
+  if(written>M)throw Error('Overfull measure after clipping: '+written+' / '+M+' ticks');
+  if(written!==M)throw Error('Underfull measure after repair: '+written+' / '+M+' ticks');
  }
  return out.map(a=>a.join(''));
 }
-function buildXML(ps,o){const M=o.beats*4,end=Math.max(1,...ps.flatMap(p=>p.notes.map(n=>n.s+n.d))),nMeas=Math.ceil(end/M),key=o.keyObj||detectKey(raw),fifths=FIFTHS[key.minor?(key.t+3)%12:key.t],clefs={S:'<sign>G</sign><line>2</line>',B:'<sign>F</sign><line>4</line>'};let x='<?xml version="1.0" encoding="UTF-8"?><score-partwise version="3.1"><work><work-title>'+esc(o.title)+'</work-title></work><part-list>'+ps.map((p,i)=>'<score-part id="P'+(i+1)+'"><part-name>'+esc(p.name)+'</part-name></score-part>').join('')+'</part-list>';ps.forEach((p,i)=>{const ms=partMeasures(p.notes,M,nMeas,fifths,o.small);x+='<part id="P'+(i+1)+'">'+ms.map((c,k)=>'<measure number="'+(k+1)+'">'+(k===0?'<attributes><divisions>4</divisions><key><fifths>'+fifths+'</fifths></key><time><beats>'+o.beats+'</beats><beat-type>4</beat-type></time><clef>'+clefs[p.clef]+'</clef></attributes>'+(i===0?'<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>'+o.bpm+'</per-minute></metronome></direction-type><sound tempo="'+o.bpm+'"/></direction>':''):'')+c+'</measure>').join('')+'</part>'});return{xml:x+'</score-partwise>',key,fifths}}
+function buildXML(ps,o){const M=o.beats*4,minStart=Math.min(0,...ps.flatMap(p=>p.notes.map(n=>n.s))),origin=Math.floor(minStart/M)*M,end=Math.max(origin+1,...ps.flatMap(p=>p.notes.map(n=>n.s+n.d))),nMeas=Math.max(1,Math.ceil((end-origin)/M)),key=o.keyObj||detectKey(raw),fifths=FIFTHS[key.minor?(key.t+3)%12:key.t],clefs={S:'<sign>G</sign><line>2</line>',B:'<sign>F</sign><line>4</line>'};let x='<?xml version="1.0" encoding="UTF-8"?><score-partwise version="3.1"><work><work-title>'+esc(o.title)+'</work-title></work><part-list>'+ps.map((p,i)=>'<score-part id="P'+(i+1)+'"><part-name>'+esc(p.name)+'</part-name></score-part>').join('')+'</part-list>';ps.forEach((p,i)=>{const ms=partMeasures(p.notes,M,nMeas,fifths,o.small,origin);x+='<part id="P'+(i+1)+'">'+ms.map((c,k)=>'<measure number="'+(k+1)+'">'+(k===0?'<attributes><divisions>4</divisions><key><fifths>'+fifths+'</fifths></key><time><beats>'+o.beats+'</beats><beat-type>4</beat-type></time><clef>'+clefs[p.clef]+'</clef></attributes>'+(i===0?'<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>'+o.bpm+'</per-minute></metronome></direction-type><sound tempo="'+o.bpm+'"/></direction>':''):'')+c+'</measure>').join('')+'</part>'});return{xml:x+'</score-partwise>',key,fifths}}
 function makeParts(source,o){const grid=buildBeatGrid(source,o.bpm),P=[{clef:'S',name:o.names[1],notes:[]},{clef:'B',name:o.names[0],notes:[]}];beatGrid=grid;source.forEach(n=>{const m=Math.round(n.pitchMidi),i=m<o.cuts[0]?1:0;const exactStart=grid.toTicks(n.startTimeSeconds)+o.barStart*4,exactDur=n.durationSeconds/grid.periodAt(n.startTimeSeconds)*4;P[i].notes.push({m,a:n.amplitude||0,s:Math.max(0,Math.round(exactStart/o.small)*o.small),d:Math.max(o.small,Math.round(exactDur/o.small)*o.small),soundStart:n.startTimeSeconds,soundDur:n.durationSeconds})});P.forEach(p=>{p.notes.sort((a,b)=>a.s-b.s||b.a-a.a);const by={};p.notes.forEach(n=>(by[n.s]=by[n.s]||[]).push(n));const out=[];Object.keys(by).map(Number).sort((a,b)=>a-b).forEach(s=>{const seen={};by[s].filter(n=>!seen[n.m]&&(seen[n.m]=1)).slice(0,10).forEach(n=>out.push(n))});out.forEach(n=>{n.d=Math.max(1,n.d)});p.notes=out});return P.filter(p=>p.notes.length)}
 async function loadBP(){msg('Loading transcription engine…');for(const u of['https://cdn.jsdelivr.net/npm/@spotify/basic-pitch@1.0.1/+esm','https://esm.sh/@spotify/basic-pitch@1.0.1']){try{return await import(u)}catch(e){}}throw Error('Transcription engine could not load.')}
 async function engine(){BP=BP||await loadBP();bp=bp||new BP.BasicPitch('https://cdn.jsdelivr.net/npm/@spotify/basic-pitch@1.0.1/model/model.json')}

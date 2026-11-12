@@ -20,178 +20,56 @@ progress{width:100%;height:8px;display:none}
 @media print{body{background:#fff}body>*:not(#score){display:none!important}#score{overflow:visible}}
 </style></head><body>
 <h1>Listen &amp; Score</h1>
-<div id="msg">Record the music or choose an audio file. It will be turned into staff notation.</div>
+<div id="msg">Record music or open an audio file. Analysis runs once; settings redraw the score from stored notes.</div>
 <div class="row"><button id="rec">Record</button><button id="clip" disabled>Save clip</button><label id="up" for="file">Open audio file</label><input id="file" type="file" accept="audio/*" hidden></div>
 <progress id="pg" max="100" value="0"></progress>
-<details><summary>Settings (all automatic, editable)</summary>
-<label>Tempo<input id="bpm" type="number" value="90" min="40" max="200"></label>
+<details open><summary>Settings</summary>
+<label>Tempo<input id="bpm" type="number" value="90" min="40" max="240"></label>
+<div class="row"><button id="half">Tempo /2</button><button id="double">Tempo x2</button></div>
+<label>Metronome<input id="metro" type="checkbox" checked></label>
 <label>Time signature<select id="ts"><option value="4">4/4</option><option value="3">3/4</option><option value="2">2/4</option></select></label>
 <label>Key<select id="key"><option value="-1" selected>Auto-detect</option><option value="0">C major</option><option value="1">D♭ major</option><option value="2">D major</option><option value="3">E♭ major</option><option value="4">E major</option><option value="5">F major</option><option value="6">F♯ major</option><option value="7">G major</option><option value="8">A♭ major</option><option value="9">A major</option><option value="10">B♭ major</option><option value="11">B major</option><option value="12">C minor</option><option value="13">D♭ minor</option><option value="14">D minor</option><option value="15">E♭ minor</option><option value="16">E minor</option><option value="17">F minor</option><option value="18">F♯ minor</option><option value="19">G minor</option><option value="20">A♭ minor</option><option value="21">A minor</option><option value="22">B♭ minor</option><option value="23">B minor</option></select></label>
+<label>Smallest note<select id="small"><option value="4">Quarter</option><option value="2" selected>Eighth</option><option value="1">Sixteenth</option></select></label>
+<label>Piano sustain<select id="sustain"><option value="0.25">Off</option><option value="0.15" selected>Medium</option><option value="0.08">Long</option></select></label>
 <label>Sensitivity<select id="sens"><option value="0">Normal</option><option value="1" selected>High</option><option value="2">Maximum</option></select></label>
 <label>Upper staff name<input id="n1" value="Right hand"></label>
 <label>Lower staff name<input id="n0" value="Left hand"></label>
 <label>Lower staff below MIDI note<input id="c0" type="number" value="60"></label>
 <label>Snap notes to the key<select id="snap"><option value="0" selected>No (keep every heard note)</option><option value="1">Yes</option></select></label>
-<div style="font-size:13px;color:var(--dim)">Middle C = 60. Every note heard is written, including chords. The score updates every few seconds while you record.</div>
-<div class="row" style="margin-top:8px"><button id="upd" disabled>Update score</button></div>
-</details>
+<div class="row"><button id="upd" disabled>Redraw score</button></div></details>
 <div class="row"><button id="play" disabled>Play</button><button id="mid" disabled>MIDI</button><button id="xml" disabled>MusicXML</button><button id="prt" disabled>Print / PDF</button></div>
 <div id="score"></div>
+<details><summary>Show detected notes (first 40)</summary><div id="detected">No analysis yet.</div></details>
+<footer style="text-align:center;color:var(--dim);font-size:12px;padding:18px 0 8px" aria-label="Application version">v6</footer>
 <script src="https://cdn.jsdelivr.net/npm/opensheetmusicdisplay@2.2.1/build/opensheetmusicdisplay.min.js"></script>
 <script>
-const SH=[['C',0],['C',1],['D',0],['D',1],['E',0],['F',0],['F',1],['G',0],['G',1],['A',0],['A',1],['B',0]],
- FL=[['C',0],['D',-1],['D',0],['E',-1],['E',0],['F',0],['G',-1],['G',0],['A',-1],['A',0],['B',-1],['B',0]];
-const FIFTHS=[0,-5,2,-3,4,-1,6,1,-4,3,-2,5],MAJ=[6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88],MIN=[6.33,2.68,3.52,5.38,2.60,3.53,2.54,4.75,3.98,2.69,3.34,3.17];
-const DUR=[[16,'whole',0],[12,'half',1],[8,'half',0],[6,'quarter',1],[4,'quarter',0],[3,'eighth',1],[2,'eighth',0],[1,'16th',0]];
-const esc=s=>String(s).replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
-function detectKey(notes){
- const h=Array(12).fill(0);notes.forEach(n=>h[n.m%12]+=n.d);
- const cor=(p,t)=>{const mp=p.reduce((x,y)=>x+y)/12,mh=h.reduce((x,y)=>x+y)/12;let a=0,b=0,c=0;
-  for(let k=0;k<12;k++){const x=p[(k-t+12)%12]-mp,y=h[k]-mh;a+=x*y;b+=x*x;c+=y*y}return a/Math.sqrt(b*c||1)};
- let best={t:0,minor:false,s:-9};
- for(let t=0;t<12;t++)for(const mi of[false,true]){const s=cor(mi?MIN:MAJ,t);if(s>best.s)best={t,minor:mi,s}}
- return best}
-function splitDur(d){const o=[];while(d>0){const x=DUR.find(z=>z[0]<=d);o.push(x);d-=x[0]}return o}
-function noteXml(m,piece,fifths,chord,tie){
- const sp=(fifths<0?FL:SH)[m%12];
- return '<note>'+(chord?'<chord/>':'')+'<pitch><step>'+sp[0]+'</step>'+(sp[1]?'<alter>'+sp[1]+'</alter>':'')+'<octave>'+(Math.floor(m/12)-1)+'</octave></pitch><duration>'+piece[0]+'</duration>'
- +(tie.stop?'<tie type="stop"/>':'')+(tie.start?'<tie type="start"/>':'')+'<type>'+piece[1]+'</type>'+(piece[2]?'<dot/>':'')
- +((tie.stop||tie.start)?'<notations>'+(tie.stop?'<tied type="stop"/>':'')+(tie.start?'<tied type="start"/>':'')+'</notations>':'')+'</note>'}
-function partMeasures(notes,M,nMeas,fifths){
- const ns=notes.slice().sort((a,b)=>a.s-b.s||a.m-b.m),groups=[];
- ns.forEach(n=>{const g=groups[groups.length-1];if(g&&g.s===n.s){g.ms.push(n.m);g.d=Math.min(g.d,n.d)}else groups.push({s:n.s,d:n.d,ms:[n.m]})});
- groups.forEach((g,i)=>{if(i<groups.length-1)g.d=Math.min(g.d,groups[i+1].s-g.s);g.d=Math.max(1,g.d)});
- const items=[];let pos=0;
- groups.forEach(g=>{if(g.s>pos)items.push({rest:1,s:pos,d:g.s-pos});items.push({rest:0,s:g.s,d:g.d,ms:g.ms});pos=g.s+g.d});
- if(pos<nMeas*M)items.push({rest:1,s:pos,d:nMeas*M-pos});
- const out=Array.from({length:nMeas},()=>[]);
- items.forEach(it=>{let s=it.s,left=it.d,first=true;
-  while(left>0){const mi=Math.floor(s/M),chunk=Math.min(left,(mi+1)*M-s),ps=splitDur(chunk);
-   ps.forEach((p,k)=>{const lastPiece=left-chunk<=0&&k===ps.length-1,tie={stop:!first,start:!lastPiece};
-    if(it.rest){out[mi].push(chunk===M&&s%M===0?'<note><rest measure="yes"/><duration>'+M+'</duration></note>':'<note><rest/><duration>'+p[0]+'</duration><type>'+p[1]+'</type>'+(p[2]?'<dot/>':'')+'</note>')}
-    else it.ms.forEach((m,j)=>out[mi].push(noteXml(m,p,fifths,j>0,tie)));
-    first=false});
-   s+=chunk;left-=chunk}});
- return out.map(a=>a.join(''))}
-function buildXML(parts,o){
- const M=o.beats*4,end=Math.max(1,...parts.flatMap(p=>p.notes.map(n=>n.s+n.d))),nMeas=Math.ceil(end/M),key=o.keyObj||detectKey(parts.flatMap(p=>p.notes));
- const fifths=FIFTHS[key.minor?(key.t+3)%12:key.t],clefs={S:'<sign>G</sign><line>2</line>',T:'<sign>G</sign><line>2</line><clef-octave-change>-1</clef-octave-change>',B:'<sign>F</sign><line>4</line>'};
- let x='<?xml version="1.0" encoding="UTF-8"?><score-partwise version="3.1"><work><work-title>'+esc(o.title)+'</work-title></work><part-list>'
- +parts.map((p,i)=>'<score-part id="P'+(i+1)+'"><part-name>'+esc(p.name)+'</part-name></score-part>').join('')+'</part-list>';
- parts.forEach((p,i)=>{const ms=partMeasures(p.notes,M,nMeas,fifths);
-  x+='<part id="P'+(i+1)+'">'+ms.map((c,k)=>'<measure number="'+(k+1)+'">'+(k===0?'<attributes><divisions>4</divisions><key><fifths>'+fifths+'</fifths></key><time><beats>'+o.beats+'</beats><beat-type>4</beat-type></time><clef>'+clefs[p.clef]+'</clef></attributes>'
-   +(i===0?'<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>'+o.bpm+'</per-minute></metronome></direction-type><sound tempo="'+o.bpm+'"/></direction>':''):'')+c+'</measure>').join('')+'</part>'});
- return{xml:x+'</score-partwise>',key:key,fifths:fifths}}
-function snapD(d){if(d>16)return d;let b=1;[1,2,3,4,6,8,12,16].forEach(v=>{if(Math.abs(v-d)<Math.abs(b-d))b=v});return b}
-function estimateBpm(raw){let best=90,bs=-1;
- for(let b=50;b<=180;b++){const gr=30/b;let c=0,s=0;
-  raw.forEach(n=>{const w=n.amplitude||.5,a=2*Math.PI*n.startTimeSeconds/gr;c+=w*Math.cos(a);s+=w*Math.sin(a)});
-  const sc=Math.hypot(c,s)/raw.length*Math.exp(-Math.pow(Math.log2(b/100),2)/.245);if(sc>bs){bs=sc;best=b}}
- return best}
-function makeParts(raw,o){
- const g=60/o.bpm/4,t0=Math.min(...raw.map(n=>n.startTimeSeconds))-(o.pad||0)*60/o.bpm,P=[{clef:'S',name:o.names[1]},{clef:'B',name:o.names[0]}].map(p=>({name:p.name,clef:p.clef,notes:[]}));
- raw.forEach(n=>{const m=Math.round(n.pitchMidi),i=m<o.cuts[0]?1:0;
-  P[i].notes.push({m,a:n.amplitude||0,s:Math.round((n.startTimeSeconds-t0)/g),d:Math.max(1,Math.round(n.durationSeconds/g))})});
- P.forEach(p=>{p.notes.sort((a,b)=>a.s-b.s||b.a-a.a);const by={};
-  p.notes.forEach(n=>{(by[n.s]=by[n.s]||[]).push(n)});
-  const out=[];Object.keys(by).map(Number).sort((a,b)=>a-b).forEach(s=>{const seen={};by[s].filter(n=>!seen[n.m]&&(seen[n.m]=1)).slice(0,4).forEach(n=>out.push(n))});
-  const starts=[...new Set(out.map(n=>n.s))];
-  out.forEach(n=>{const k=starts.indexOf(n.s),nx=starts[k+1];if(nx!==undefined){const gap=nx-(n.s+n.d);if(gap>0&&gap<=2)n.d=nx-n.s}n.d=snapD(n.d)});
-  p.notes=out});
- return P.filter(p=>p.notes.length)}
-function midiBlob(parts,bpm){
- const ppq=480,e=ppq/4,ev=[];
- parts.forEach((p,i)=>p.notes.forEach(n=>{ev.push({t:n.s*e,b:[0x90|i,n.m,90],o:1});ev.push({t:(n.s+n.d)*e,b:[0x80|i,n.m,0],o:0})}));
- ev.sort((a,b)=>a.t-b.t||a.o-b.o);
- const mpq=Math.round(6e7/bpm),tr=[0,0xFF,0x51,3,mpq>>16&255,mpq>>8&255,mpq&255];
- parts.forEach((p,i)=>tr.push(0,0xC0|i,0));
- let q=0;ev.forEach(x=>{let dl=x.t-q;q=x.t;const v=[dl&127];while(dl>>=7)v.unshift((dl&127)|128);tr.push(...v,...x.b)});
- tr.push(0,0xFF,0x2F,0);const L=tr.length;
- return new Blob([new Uint8Array([0x4d,0x54,0x68,0x64,0,0,0,6,0,1,0,1,ppq>>8,ppq&255,0x4d,0x54,0x72,0x6b,L>>24&255,L>>16&255,L>>8&255,L&255,...tr])],{type:'audio/midi'})}
-const $=id=>document.getElementById(id),msg=s=>$('msg').textContent=s;
-let BP,bp,F=[],O=[],autoT=false,clipBlob,raw=[],parts=[],xmlStr='',osmd,ctx,rec,chunks=[],playing=[],busy=false,padBeats=0,live=null;
-const opts=()=>({key:+$('key').value,bpm:+$('bpm').value||90,beats:+$('ts').value,title:'Transcription',cuts:[+$('c0').value],names:[$('n0').value,$('n1').value]});
-async function loadBP(){msg('Loading the transcription engine (first time only)…');for(const u of['https://cdn.jsdelivr.net/npm/@spotify/basic-pitch@1.0.1/+esm','https://esm.sh/@spotify/basic-pitch@1.0.1']){try{return await import(u)}catch(e){}}throw new Error('engine did not load. Check your internet connection')}
+const SH=[['C',0],['C',1],['D',0],['D',1],['E',0],['F',0],['F',1],['G',0],['G',1],['A',0],['A',1],['B',0]],FL=[['C',0],['D',-1],['D',0],['E',-1],['E',0],['F',0],['G',-1],['G',0],['A',-1],['A',0],['B',-1],['B',0]],FIFTHS=[0,-5,2,-3,4,-1,6,1,-4,3,-2,5],MAJ=[6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88],MIN=[6.33,2.68,3.52,5.38,2.60,3.53,2.54,4.75,3.98,2.69,3.34,3.17];
+const DUR=[[16,'whole',0],[12,'half',1],[8,'half',0],[6,'quarter',1],[4,'quarter',0],[3,'eighth',1],[2,'eighth',0],[1,'16th',0]],$=id=>document.getElementById(id),msg=s=>$('msg').textContent=s,esc=s=>String(s).replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+let BP,bp,F=[],O=[],raw=[],parts=[],xmlStr='',osmd,ctx,rec,clipBlob,playing=[],busy=false,recordTimer=null,metroTimer=null,recStart=0,rawAudio=null,recordedChunks=[];
+const opts=()=>({key:+$('key').value,bpm:Math.max(1,+$('bpm').value||90),beats:+$('ts').value,title:'Transcription',cuts:[+$('c0').value],names:[$('n0').value,$('n1').value],small:+$('small').value});
+function detectKey(notes){const h=Array(12).fill(0);notes.forEach(n=>h[Math.round(n.pitchMidi)%12]+=Math.max(.01,n.durationSeconds));const cor=(p,t)=>{const mp=p.reduce((x,y)=>x+y)/12,mh=h.reduce((x,y)=>x+y)/12;let a=0,b=0,c=0;for(let k=0;k<12;k++){const x=p[(k-t+12)%12]-mp,y=h[k]-mh;a+=x*y;b+=x*x;c+=y*y}return a/Math.sqrt(b*c||1)};let best={t:0,minor:false,s:-9};for(let t=0;t<12;t++)for(const mi of[false,true]){const s=cor(mi?MIN:MAJ,t);if(s>best.s)best={t,minor:mi,s}}return best}
+function splitDur(d){const out=[];while(d>0){const x=DUR.find(z=>z[0]<=d)||DUR[DUR.length-1];out.push(x);d-=x[0]}return out}
+function snapD(d,small){const allowed=small===4?[4,8,12,16]:small===2?[2,3,4,6,8,12,16]:[1,2,3,4,6,8,12,16];return allowed.reduce((a,b)=>Math.abs(b-d)<Math.abs(a-d)?b:a,allowed[0])}
+function noteXml(m,piece,fifths,chord,tie){const sp=(fifths<0?FL:SH)[m%12];return '<note>'+(chord?'<chord/>':'')+'<pitch><step>'+sp[0]+'</step>'+(sp[1]?'<alter>'+sp[1]+'</alter>':'')+'<octave>'+(Math.floor(m/12)-1)+'</octave></pitch><duration>'+piece[0]+'</duration>'+(tie.stop?'<tie type="stop"/>':'')+(tie.start?'<tie type="start"/>':'')+'<type>'+piece[1]+'</type>'+(piece[2]?'<dot/>':'')+((tie.stop||tie.start)?'<notations>'+(tie.stop?'<tied type="stop"/>':'')+(tie.start?'<tied type="start"/>':'')+'</notations>':'')+'</note>'}
+function partMeasures(notes,M,nMeas,fifths,small){const ns=notes.slice().sort((a,b)=>a.s-b.s||a.m-b.m),groups=[];ns.forEach(n=>{let g=groups[groups.length-1];if(g&&g.s===n.s){g.ms.push(n.m);g.d=Math.max(g.d,n.d)}else groups.push({s:n.s,d:n.d,ms:[n.m]})});groups.forEach(g=>{g.d=Math.max(1,g.d)});const items=[];let pos=0;groups.forEach(g=>{if(g.s>pos)items.push({rest:1,s:pos,d:g.s-pos});items.push({rest:0,s:g.s,d:g.d,ms:g.ms});pos=g.s+g.d});if(pos<nMeas*M)items.push({rest:1,s:pos,d:nMeas*M-pos});const out=Array.from({length:nMeas},()=>[]);items.forEach(it=>{let s=it.s,left=it.d,first=true;while(left>0){const mi=Math.floor(s/M),chunk=Math.min(left,(mi+1)*M-s),ps=splitDur(chunk);ps.forEach((p,k)=>{const last=left-chunk<=0&&k===ps.length-1,tie={stop:!first,start:!last};if(it.rest)out[mi].push('<note><rest/><duration>'+p[0]+'</duration><type>'+p[1]+'</type>'+(p[2]?'<dot/>':'')+'</note>');else it.ms.forEach((m,j)=>out[mi].push(noteXml(m,p,fifths,j>0,tie)));first=false});s+=chunk;left-=chunk}});return out.map(a=>a.join(''))}
+function buildXML(ps,o){const M=o.beats*4,end=Math.max(1,...ps.flatMap(p=>p.notes.map(n=>n.s+n.d))),nMeas=Math.ceil(end/M),key=o.keyObj||detectKey(raw),fifths=FIFTHS[key.minor?(key.t+3)%12:key.t],clefs={S:'<sign>G</sign><line>2</line>',B:'<sign>F</sign><line>4</line>'};let x='<?xml version="1.0" encoding="UTF-8"?><score-partwise version="3.1"><work><work-title>'+esc(o.title)+'</work-title></work><part-list>'+ps.map((p,i)=>'<score-part id="P'+(i+1)+'"><part-name>'+esc(p.name)+'</part-name></score-part>').join('')+'</part-list>';ps.forEach((p,i)=>{const ms=partMeasures(p.notes,M,nMeas,fifths,o.small);x+='<part id="P'+(i+1)+'">'+ms.map((c,k)=>'<measure number="'+(k+1)+'">'+(k===0?'<attributes><divisions>4</divisions><key><fifths>'+fifths+'</fifths></key><time><beats>'+o.beats+'</beats><beat-type>4</beat-type></time><clef>'+clefs[p.clef]+'</clef></attributes>'+(i===0?'<direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>'+o.bpm+'</per-minute></metronome></direction-type><sound tempo="'+o.bpm+'"/></direction>':''):'')+c+'</measure>').join('')+'</part>'});return{xml:x+'</score-partwise>',key,fifths}}
+function makeParts(source,o){const q=60/o.bpm/4,t0=Math.min(...source.map(n=>n.startTimeSeconds));const P=[{clef:'S',name:o.names[1],notes:[]},{clef:'B',name:o.names[0],notes:[]}];source.forEach(n=>{const m=Math.round(n.pitchMidi),i=m<o.cuts[0]?1:0;const exactStart=(n.startTimeSeconds-t0)/(q),exactDur=n.durationSeconds/q;P[i].notes.push({m,a:n.amplitude||0,s:Math.max(0,Math.round(exactStart/o.small)*o.small),d:Math.max(o.small,Math.round(exactDur/o.small)*o.small),soundStart:n.startTimeSeconds,soundDur:n.durationSeconds})});P.forEach(p=>{p.notes.sort((a,b)=>a.s-b.s||b.a-a.a);const by={};p.notes.forEach(n=>(by[n.s]=by[n.s]||[]).push(n));const out=[];Object.keys(by).map(Number).sort((a,b)=>a-b).forEach(s=>{const seen={};by[s].filter(n=>!seen[n.m]&&(seen[n.m]=1)).slice(0,10).forEach(n=>out.push(n))});out.forEach(n=>{n.d=Math.max(1,n.d)});p.notes=out});return P.filter(p=>p.notes.length)}
+async function loadBP(){msg('Loading transcription engine…');for(const u of['https://cdn.jsdelivr.net/npm/@spotify/basic-pitch@1.0.1/+esm','https://esm.sh/@spotify/basic-pitch@1.0.1']){try{return await import(u)}catch(e){}}throw Error('Transcription engine could not load.')}
 async function engine(){BP=BP||await loadBP();bp=bp||new BP.BasicPitch('https://cdn.jsdelivr.net/npm/@spotify/basic-pitch@1.0.1/model/model.json')}
-async function feed(data){
- let pk=0;for(let i=0;i<data.length;i++){const v=Math.abs(data[i]);if(v>pk)pk=v}
- if(pk>0.001&&pk<0.9){const k=Math.min(8,0.9/pk);data=data.map(v=>v*k)}
- await bp.evaluateModel(data,(f,o,c)=>{for(const x of f)F.push(x);for(const x of o)O.push(x)},()=>{})}
-async function transcribeFile(arrayBuf){
- try{
-  if(busy)return;busy=true;F=[];O=[];await engine();
-  msg('Reading audio…');
-  const ac=new(window.AudioContext||window.webkitAudioContext)({sampleRate:22050});
-  const buf=await ac.decodeAudioData(arrayBuf);ac.close();
-  const data=buf.getChannelData(0),step=22050*4;
-  for(let s=0;s<data.length;s+=step){
-   await feed(data.slice(s,Math.min(data.length,s+step)));
-   autoT=true;await render('Writing… '+Math.round(Math.min(100,(s+step)/data.length*100))+'% · ')}
-  msg(document.getElementById('msg').textContent.replace('Writing… 100% · ',''));
- }catch(e){msg('Could not process this audio: '+e.message)}finally{busy=false}}
-function detectMeter(raw,bpm){
- const beat=60/bpm,t0=Math.min(...raw.map(n=>n.startTimeSeconds)),end=Math.max(...raw.map(n=>n.startTimeSeconds+n.durationSeconds)),nb=Math.ceil((end-t0)/beat)+2,acc=Array(nb).fill(0);
- raw.forEach(n=>{const b=Math.round((n.startTimeSeconds-t0)/beat);if(b>=0&&b<nb)acc[b]+=(n.amplitude||.5)*(.5+Math.min(n.durationSeconds/beat,4)/4)});
- const tot=acc.reduce((a,b)=>a+b,0)/nb||1;let best={L:4,p:0,s:-1e9};
- for(const L of[4,3,2])for(let p=0;p<L;p++){let ds=0,dn=0,os=0,on=0;acc.forEach((v,i)=>{if(i%L===p){ds+=v;dn++}else{os+=v;on++}});
-  const sc=(ds/(dn||1)-os/(on||1))/tot-(L===2?.1:L===3?.05:0)-(p>0?.03:0);if(sc>best.s)best={L,p,s:sc}}
- return{L:best.L,pad:(best.L-best.p)%best.L}}
-function keyFromSel(v,raw){if(v>=12)return{t:v-12,minor:true};if(v>=0)return{t:v,minor:false};
- return detectKey(raw.map(n=>({m:Math.round(n.pitchMidi),d:Math.max(1,n.durationSeconds*10)})))}
-function snapKey(raw,k){const sc=(k.minor?[0,2,3,5,7,8,10,11]:[0,2,4,5,7,9,11]);
- return raw.map(n=>{const m=Math.round(n.pitchMidi);let b=m,bd=9;for(let d=-2;d<=2;d++){if(sc.includes(((m+d-k.t)%12+12)%12)&&Math.abs(d)<bd){bd=Math.abs(d);b=m+d}}return Object.assign({},n,{pitchMidi:b})})}
-
-async function render(prefix){
- prefix=prefix||'';
- const th=[[.5,.3],[.35,.25],[.25,.2]][+$('sens').value];
- if(!F.length){return}
- raw=BP.noteFramesToTime(BP.outputToNotesPoly(F,O,th[0],th[1],6)).filter(n=>n.durationSeconds>=0.08&&(n.amplitude||0)>=0.2);
- if(!raw.length){msg(prefix+'Listening… no clear notes yet.');return}
- if(autoT){$('bpm').value=estimateBpm(raw);const mt=detectMeter(raw,+$('bpm').value);$('ts').value=mt.L;padBeats=mt.pad;autoT=false}
- const o=opts();o.pad=padBeats;const kk=keyFromSel(o.key,raw);o.keyObj=kk;
- const src=$('snap').value==='1'?snapKey(raw,kk):raw;parts=makeParts(src,o);
- const r=buildXML(parts,o);xmlStr=r.xml;
- try{
-  osmd=osmd||new opensheetmusicdisplay.OpenSheetMusicDisplay('score',{autoResize:true,drawTitle:true,drawPartNames:true});
-  await osmd.load(xmlStr);osmd.render();
- }catch(e){msg('Score drawing failed: '+e.message+'. You can still save the MusicXML.')}
- msg(prefix+'key '+['C','Db','D','Eb','E','F','F#','G','Ab','A','Bb','B'][r.key.t]+(r.key.minor?' minor':' major')+' · '+o.beats+'/4 · '+raw.length+' notes · tempo '+o.bpm);
- ['play','mid','xml','prt','upd'].forEach(i=>$(i).disabled=false)}
-$('upd').onclick=()=>render();
-$('file').onchange=async e=>{const f=e.target.files[0];if(f)transcribeFile(await f.arrayBuffer());e.target.value=''};
-async function liveStep(final){
- if(busy&&!final)return;busy=true;
- try{const n=live.buf.length;if(n>live.done){const all=new Float32Array(n-live.done);for(let i=live.done;i<n;i++)all[i-live.done]=live.buf[i];live.done=n;await feed(all);autoT=true;await render('Live · ')}}
- finally{busy=false}}
-$('rec').onclick=async()=>{
- if(rec&&rec.state==='recording'){rec.stop();return}
- try{
-  await engine();F=[];O=[];
-  const s=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
-  const ac=new(window.AudioContext||window.webkitAudioContext)({sampleRate:22050}),src=ac.createMediaStreamSource(s),sp=ac.createScriptProcessor(4096,1,1);
-  live={buf:[],done:0};
-  sp.onaudioprocess=e=>{const d=e.inputBuffer.getChannelData(0);for(let i=0;i<d.length;i++)live.buf.push(d[i])};
-  src.connect(sp);sp.connect(ac.destination);
-  chunks=[];rec=new MediaRecorder(s,{audioBitsPerSecond:128000});rec.ondataavailable=e=>chunks.push(e.data);
-  const tm=setInterval(()=>{$('rec').textContent='Stop '+Math.floor((Date.now()-t0)/1000)+'s';liveStep(false)},3000);
-  rec.onstop=async()=>{clearInterval(tm);s.getTracks().forEach(t=>t.stop());sp.disconnect();src.disconnect();ac.close();
-   $('rec').classList.remove('on');$('rec').textContent='Record';clipBlob=new Blob(chunks,{type:rec.mimeType||'audio/webm'});$('clip').disabled=false;
-   msg('Finishing…');while(busy)await new Promise(r=>setTimeout(r,200));await liveStep(true);autoT=true;await render('Final · ')};
-  rec.start();$('rec').classList.add('on');const t0=Date.now();$('rec').textContent='Stop 0s';msg('Recording… the score appears every few seconds.');
- }catch(e){msg('Could not start: '+e.message+'. Allow the microphone in Chrome: Site settings > Microphone.')}};
+function normalizeOnce(data){let peak=0;for(const v of data)peak=Math.max(peak,Math.abs(v));if(peak>0.001&&peak<0.9){const k=Math.min(8,.9/peak);return Float32Array.from(data,v=>v*k)}return data}
+async function analyseAudio(data){if(busy)return;busy=true;F=[];O=[];try{await engine();msg('Analysing whole audio…');const normalized=normalizeOnce(data);await bp.evaluateModel(normalized,(f,o)=>{F.push(...f);O.push(...o)},()=>{});extractRaw();redraw()}catch(e){msg('Analysis failed: '+e.message)}finally{busy=false}}
+function extractRaw(){const threshold=+$('sustain').value;const sensitivity=[[.5,.3],[.35,.25],[.25,.2]][+$('sens').value];raw=BP.noteFramesToTime(BP.outputToNotesPoly(F,O,sensitivity[0],threshold,6)).filter(n=>n.durationSeconds>=threshold&&(n.amplitude||0)>=.2);$('detected').innerHTML=raw.slice(0,40).map((n,i)=>'<div>'+String(i+1)+'. pitch '+Math.round(n.pitchMidi)+' · start '+n.startTimeSeconds.toFixed(3)+'s · duration '+n.durationSeconds.toFixed(3)+'s · amplitude '+(n.amplitude||0).toFixed(3)+'</div>').join('')||'No notes detected.'}
+function redraw(){if(!raw.length){msg('No notes detected.');return}const o=opts(),kk=o.key>=12?{t:o.key-12,minor:true}:o.key>=0?{t:o.key,minor:false}:detectKey(raw);o.keyObj=kk;let src=raw;if($('snap').value==='1'){const sc=kk.minor?[0,2,3,5,7,8,10,11]:[0,2,4,5,7,9,11];src=raw.map(n=>{let m=Math.round(n.pitchMidi),best=m,dist=9;for(let d=-2;d<=2;d++)if(sc.includes(((m+d-kk.t)%12+12)%12)&&Math.abs(d)<dist){dist=Math.abs(d);best=m+d}return{...n,pitchMidi:best}})}parts=makeParts(src,o);const result=buildXML(parts,o);xmlStr=result.xml;try{osmd=osmd||new opensheetmusicdisplay.OpenSheetMusicDisplay('score',{autoResize:true,drawTitle:true,drawPartNames:true});osmd.load(xmlStr).then(()=>osmd.render())}catch(e){msg('Score rendering failed: '+e.message)}msg('Ready · '+raw.length+' detected notes · '+o.bpm+' BPM · '+o.beats+'/4');['play','mid','xml','prt','upd'].forEach(id=>$(id).disabled=false)}
+$('upd').onclick=redraw;['bpm','ts','key','small','sustain','sens','c0','n0','n1','snap'].forEach(id=>$(id).addEventListener('change',()=>{if(raw.length){if(id==='sustain'||id==='sens')extractRaw();redraw()}}));$('half').onclick=()=>{$('bpm').value=Math.max(40,Math.round(opts().bpm/2));redraw()};$('double').onclick=()=>{$('bpm').value=Math.min(240,Math.round(opts().bpm*2));redraw()};
+$('file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{msg('Decoding audio…');const ac=new(window.AudioContext||window.webkitAudioContext)({sampleRate:22050}),buf=await ac.decodeAudioData(await file.arrayBuffer()),data=buf.getChannelData(0).slice();await ac.close();await analyseAudio(data)}catch(err){msg('Could not open audio: '+err.message)}e.target.value=''};
+function beep(ac,when,freq){const o=ac.createOscillator(),g=ac.createGain();o.frequency.value=freq;g.gain.setValueAtTime(.0001,when);g.gain.exponentialRampToValueAtTime(.12,when+.01);g.gain.exponentialRampToValueAtTime(.0001,when+.09);o.connect(g);g.connect(ac.destination);o.start(when);o.stop(when+.1)}
+$('rec').onclick=async()=>{if(rec&&rec.state==='recording'){rec.stop();return}try{await engine();const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});ctx=ctx||new(window.AudioContext||window.webkitAudioContext)({sampleRate:22050});await ctx.resume();let source=ctx.createMediaStreamSource(stream),processor=ctx.createScriptProcessor(4096,1,1),buffers=[];source.connect(processor);processor.connect(ctx.destination);processor.onaudioprocess=e=>buffers.push(e.inputBuffer.getChannelData(0).slice());recordedChunks=[];rec=new MediaRecorder(stream);rec.ondataavailable=e=>recordedChunks.push(e.data);rec.onstop=async()=>{clearInterval(recordTimer);clearInterval(metroTimer);metroTimer=null;$('rec').classList.remove('on');$('rec').textContent='Record';stream.getTracks().forEach(t=>t.stop());processor.disconnect();source.disconnect();clipBlob=new Blob(recordedChunks,{type:rec.mimeType||'audio/webm'});$('clip').disabled=false;msg('Preparing recording for analysis…');const len=buffers.reduce((s,b)=>s+b.length,0),all=new Float32Array(len);let off=0;buffers.forEach(b=>{all.set(b,off);off+=b.length});await analyseAudio(all)};const bpm=opts().bpm,beat=60/bpm;if($('metro').checked){msg('Count-in: 4 beats…');const countInStart=ctx.currentTime;for(let i=0;i<4;i++){beep(ctx,countInStart+i*beat,i===0?1200:800);await new Promise(r=>setTimeout(r,beat*1000))}}rec.start();recStart=Date.now();if($('metro').checked)metroTimer=setInterval(()=>beep(ctx,ctx.currentTime,800),beat*1000);$('rec').textContent='Stop 0s';recordTimer=setInterval(()=>{$('rec').textContent='Stop '+Math.floor((Date.now()-recStart)/1000)+'s'},250);msg('Recording…');}catch(e){msg('Could not start recording: '+e.message)}};
 function stopPlay(){playing.forEach(o=>{try{o.stop()}catch(e){}});playing=[];$('play').textContent='Play'}
-$('play').onclick=async()=>{
- if(playing.length)return stopPlay();
- ctx=ctx||new(window.AudioContext||window.webkitAudioContext)();await ctx.resume();
- const g=60/opts().bpm/4,t=ctx.currentTime+.1;let end=0;
- parts.forEach(p=>p.notes.forEach(n=>{const o=ctx.createOscillator(),a=ctx.createGain(),s=t+n.s*g,d=n.d*g;
-  o.type='triangle';o.frequency.value=440*2**((n.m-69)/12);a.gain.setValueAtTime(0,s);a.gain.linearRampToValueAtTime(.1,s+.02);a.gain.setValueAtTime(.1,s+Math.max(.03,d-.05));a.gain.linearRampToValueAtTime(0,s+d);
-  o.connect(a);a.connect(ctx.destination);o.start(s);o.stop(s+d+.05);playing.push(o);end=Math.max(end,s+d)}));
- $('play').textContent='Stop';setTimeout(()=>{if(ctx.currentTime>=end-.1)stopPlay()},(end-ctx.currentTime+.3)*1000)};
-const save=(blob,name)=>{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.style.display='none';document.body.appendChild(a);a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(a.href)},5000)};
-$('clip').onclick=()=>{const t=clipBlob.type,x=/mp4/.test(t)?'m4a':/ogg/.test(t)?'ogg':'webm';save(clipBlob,'recording-'+new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')+'.'+x)};
-$('mid').onclick=()=>save(midiBlob(parts,opts().bpm),'transcription.mid');
-$('xml').onclick=()=>save(new Blob([xmlStr],{type:'application/vnd.recordare.musicxml+xml'}),'transcription.musicxml');
-$('prt').onclick=()=>print();
+$('play').onclick=async()=>{if(playing.length)return stopPlay();ctx=ctx||new(window.AudioContext||window.webkitAudioContext)();await ctx.resume();let end=ctx.currentTime;raw.forEach(n=>{const o=ctx.createOscillator(),g=ctx.createGain(),s=ctx.currentTime+Math.max(0,n.startTimeSeconds-(Math.min(...raw.map(x=>x.startTimeSeconds)))),d=n.durationSeconds;o.type='triangle';o.frequency.value=440*2**((Math.round(n.pitchMidi)-69)/12);g.gain.setValueAtTime(.0001,s);g.gain.exponentialRampToValueAtTime(.09,s+.015);g.gain.setValueAtTime(.09,Math.max(s+.02,s+d-.03));g.gain.exponentialRampToValueAtTime(.0001,s+d);o.connect(g);g.connect(ctx.destination);o.start(s);o.stop(s+d+.01);playing.push(o);end=Math.max(end,s+d)});$('play').textContent='Stop';setTimeout(stopPlay,Math.max(100,(end-ctx.currentTime)*1000+150))};
+function vlq(v){let b=v&127;while(v>>=7)b=(b<<8)|((v&127)|128);const a=[];while(true){a.push(b&255);if(b&128)b>>=8;else break}return a}
+function midiBlob(ps,bpm){const ppq=480,events=[];ps.forEach((p,i)=>p.notes.forEach(n=>{const start=Math.max(0,n.soundStart-Math.min(...raw.map(x=>x.startTimeSeconds))),end=start+n.soundDur;events.push({t:Math.round(start*bpm/60*ppq),b:[0x90|i,n.m,90]},{t:Math.round(end*bpm/60*ppq),b:[0x80|i,n.m,0]})}));events.sort((a,b)=>a.t-b.t||((a.b[0]&0xf0)==0x80?-1:1));const mpq=Math.round(60000000/bpm),tr=[0,0xff,0x51,3,mpq>>16&255,mpq>>8&255,mpq&255];let last=0;events.forEach(e=>{tr.push(...vlq(e.t-last),...e.b);last=e.t});tr.push(0,0xff,0x2f,0);const L=tr.length;return new Blob([new Uint8Array([0x4d,0x54,0x68,0x64,0,0,0,6,0,1,0,1,ppq>>8,ppq&255,0x4d,0x54,0x72,0x6b,L>>24&255,L>>16&255,L>>8&255,L&255,...tr])],{type:'audio/midi'})}
+function verifyMidi(blob){return blob.arrayBuffer().then(buf=>{const b=new Uint8Array(buf);let i=14;if(String.fromCharCode(...b.slice(0,4))!=='MThd'||String.fromCharCode(...b.slice(i,i+4))!=='MTrk')throw Error('MIDI header/track missing');i+=8;let on=0,off=0,tempo=0;while(i<b.length){let v=0,x;do{x=b[i++];v=(v<<7)|(x&127)}while(x&128);const st=b[i++];if(st===0xff){const type=b[i++],len=b[i++];if(type===0x51)tempo=(b[i]<<16)|(b[i+1]<<8)|b[i+2];i+=len;if(type===0x2f)break}else{const d1=b[i++],d2=b[i++];if((st&0xf0)===0x90&&d2)on++;if((st&0xf0)===0x80||((st&0xf0)===0x90&&!d2))off++}}if(on!==off)throw Error('note-on/off mismatch '+on+'/'+off);return{noteOns:on,noteOffs:off,microsecondsPerQuarter:tempo}})}
+const save=(blob,name)=>{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000)};
+$('clip').onclick=()=>save(clipBlob,'recording.webm');$('mid').onclick=async()=>{const b=midiBlob(parts,opts().bpm);try{const v=await verifyMidi(b);msg('MIDI parse-back PASS · '+v.noteOns+' note-ons / '+v.noteOffs+' note-offs')}catch(e){msg('MIDI parse-back FAIL · '+e.message)}save(b,'transcription.mid')};$('xml').onclick=()=>save(new Blob([xmlStr],{type:'application/vnd.recordare.musicxml+xml'}),'transcription.musicxml');$('prt').onclick=()=>print();
 if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
 </script></body></html>

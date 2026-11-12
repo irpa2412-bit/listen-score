@@ -24,9 +24,9 @@ progress{width:100%;height:8px;display:none}
 <div class="row"><button id="rec">Record</button><button id="clip" disabled>Save clip</button><label id="up" for="file">Open audio file</label><input id="file" type="file" accept="audio/*" hidden></div>
 <progress id="pg" max="100" value="0"></progress>
 <details open><summary>Settings</summary>
-<label>Tempo<input id="bpm" type="number" value="90" min="40" max="240"></label>
+<label>Tempo<input id="bpm" type="number" value="90" min="40" max="240"><span id="tempoState" aria-live="polite" style="font-size:12px;white-space:nowrap">not estimated</span></label>
 <div class="row"><button id="half">Tempo /2</button><button id="double">Tempo x2</button><button id="tap">Tap tempo</button></div>
-<div id="tempoState" aria-live="polite" style="font-size:12px;color:var(--dim);margin:-4px 0 8px">Tempo not yet estimated</div>
+
 <label>Metronome<input id="metro" type="checkbox"></label>
 <label>Time signature<select id="ts"><option value="4">4/4</option><option value="3">3/4</option><option value="2">2/4</option></select></label>
 <label>Key<select id="key"><option value="-1" selected>Auto-detect</option><option value="0">C major</option><option value="1">D♭ major</option><option value="2">D major</option><option value="3">E♭ major</option><option value="4">E major</option><option value="5">F major</option><option value="6">F♯ major</option><option value="7">G major</option><option value="8">A♭ major</option><option value="9">A major</option><option value="10">B♭ major</option><option value="11">B major</option><option value="12">C minor</option><option value="13">D♭ minor</option><option value="14">D minor</option><option value="15">E♭ minor</option><option value="16">E minor</option><option value="17">F minor</option><option value="18">F♯ minor</option><option value="19">G minor</option><option value="20">A♭ minor</option><option value="21">A minor</option><option value="22">B♭ minor</option><option value="23">B minor</option></select></label>

@@ -67,7 +67,7 @@ function makeParts(raw,o){
 function midiBlob(parts,bpm,pr=52){
  const ppq=480,e=ppq/4,vl=d=>{const v=[d&127];while(d>>=7)v.unshift((d&127)|128);return v};
  const trk=a=>{const L=a.length;return[0x4d,0x54,0x72,0x6b,L>>24&255,L>>16&255,L>>8&255,L&255,...a]};
- const mpq=Math.round(6e6/bpm),T=[trk([0,0xFF,0x51,3,mpq>>16&255,mpq>>8&255,mpq&255,0,0xFF,0x2F,0])];
+ const mpq=Math.round(6e7/bpm),T=[trk([0,0xFF,0x51,3,mpq>>16&255,mpq>>8&255,mpq&255,0,0xFF,0x2F,0])];
  parts.forEach((p,i)=>{const ch=i%15,c=ch<9?ch:ch+1,ev=[];
   p.notes.forEach(n=>{ev.push({t:n.s*e,b:[0x90|c,n.m,90],o:1});ev.push({t:(n.s+n.d)*e,b:[0x80|c,n.m,0],o:0})});
   ev.sort((a,b)=>a.t-b.t||a.o-b.o);
